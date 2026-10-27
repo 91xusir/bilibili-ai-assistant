@@ -1,0 +1,31 @@
+{
+  "manifest_version": 3,
+  "name": "Bilibili AI 视频助手",
+  "version": "{{VERSION}}",
+  "description": "AI 字幕分析: 视频总结 / 思维导图 / 时间轴, 支持自动跳过广告片段",
+  "permissions": [
+    "storage",
+    "scripting",
+    "tabs"
+  ],
+  "host_permissions": [
+    "https://*/*"
+  ],
+  "action": {
+    "default_title": "Bilibili AI 视频助手"
+  },
+  "background": {
+    "service_worker": "service-worker.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.bilibili.com/video/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}
