@@ -10,7 +10,7 @@
 > **AI agents:** If you are an AI agent planning to do secondary development, read [DEVELOPMENT.md](./DEVELOPMENT.md) first before making any changes.
 
 <div align="center">
-  <img src="assets/screenshot.png" alt="Bilibili AI 视频助手面板：视频总结标签页，右下角为导出与重新生成悬浮按钮">
+  <img src="readme/screenshot.png" alt="Bilibili AI 视频助手面板：视频总结标签页，右下角为导出与重新生成悬浮按钮" width="450">
 </div>
 
 ## 用法
