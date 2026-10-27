@@ -352,7 +352,10 @@ export function extractJson(text: string): unknown {
             /* ignore */
         }
     }
-    throw new Error("无法从 AI 回复中解析出 JSON");
+    // 错误信息带回复片段, 便于诊断模型输出异常 (截断/拒绝/夹带解释文字)
+    throw new Error(
+        `无法从 AI 回复中解析出 JSON (共 ${trimmed.length} 字, 开头: ${trimmed.slice(0, 120).replace(/\s+/g, " ")})`,
+    );
 }
 
 /** 非流式 JSON 请求. */

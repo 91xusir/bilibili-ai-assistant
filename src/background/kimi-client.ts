@@ -93,16 +93,35 @@ async function isTabAlive(id: number): Promise<boolean> {
     }
 }
 
+/** 复用用户已打开的 kimi.com 标签页 (加载完成), 避免每次任务都开新标签页. */
+async function findExistingKimiTab(): Promise<number | null> {
+    try {
+        const tabs = await chrome.tabs.query({ url: `${KIMI_BASE}/*` });
+        for (const tab of tabs) {
+            if (tab.id !== undefined && tab.status === "complete") return tab.id;
+        }
+    } catch {
+        /* ignore */
+    }
+    return null;
+}
+
 /**
  * 获取常驻 kimi 标签页 (页面内流式回退专用).
- * 并发去重: 同时只创建一个; 用户关掉则重建; tab id 持久化到 storage.session,
- * SW 被回收重启后复用既有标签页而不是再开一个新的.
+ * 优先级: session 持久化的 tab → 用户已打开的 kimi.com 标签页 → 后台新建
+ * (active:false, 不抢焦点); 并发去重, 用户关掉则按优先级重建.
  */
 async function ensureKimiTab(): Promise<number> {
     const persisted = await sessionGet<number>(KIMI_TAB_KEY);
     if (persisted !== null && (await isTabAlive(persisted))) {
         kimiTabId = persisted;
         return persisted;
+    }
+    const existing = await findExistingKimiTab();
+    if (existing !== null) {
+        kimiTabId = existing;
+        await sessionSet(KIMI_TAB_KEY, existing);
+        return existing;
     }
     kimiTabId = null;
     await sessionSet(KIMI_TAB_KEY, null);
@@ -120,12 +139,25 @@ async function ensureKimiTab(): Promise<number> {
 }
 
 /**
- * 一次性临时页: 打开 kimi.com 读取 localStorage 后立即关闭.
- * 授权阶段用, 避免留下可见标签页.
+ * 读取 kimi.com 的页面数据: 优先在用户已打开的 kimi.com 标签页上执行
+ * (零新标签页); 没有才后台开一个临时页 (active:false), 读完立即关闭.
  */
 async function readLocalStorageOnce<T>(
     script: () => T | Promise<T>,
 ): Promise<T> {
+    const execute = (tabId: number) =>
+        chrome.scripting.executeScript({
+            target: { tabId },
+            world: "ISOLATED",
+            func: script as (...args: never[]) => T,
+        });
+
+    const existing = await findExistingKimiTab();
+    if (existing !== null) {
+        const results = await execute(existing);
+        return results?.[0]?.result as T;
+    }
+
     const tab = await chrome.tabs.create({
         url: `${KIMI_BASE}/`,
         active: false,
@@ -147,14 +179,10 @@ async function readLocalStorageOnce<T>(
             const timeout = setTimeout(finish, 15_000);
             chrome.tabs.onUpdated.addListener(listener);
         });
-        const results = await chrome.scripting.executeScript({
-            target: { tabId: id },
-            world: "ISOLATED",
-            func: script as (...args: never[]) => T,
-        });
+        const results = await execute(id);
         return results?.[0]?.result as T;
     } finally {
-        // 授权页读完即关, 不留垃圾标签页
+        // 临时授权页读完即关, 不留垃圾标签页
         try {
             await chrome.tabs.remove(id);
         } catch {

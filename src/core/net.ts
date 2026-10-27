@@ -83,6 +83,8 @@ export function platformRequest(options: PlatformRequestOptions): {
             }
         });
         port.onDisconnect.addListener(() => {
+            // 页面进 bfcache 等场景会带 lastError 断开, 不读取会报 Unchecked runtime.lastError
+            void chrome.runtime.lastError;
             cleanup();
             reject(new Error("与扩展后台的连接已断开"));
         });

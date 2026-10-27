@@ -47,8 +47,8 @@ function scopeRequirements(scope: CombinedScope): string {
     }
     if (scope.summary) {
         reqs.push(
-            'sections (数组): 每项 {"start": 章节开始秒数(数字), "end": 章节结束秒数(数字), "title": "简短章节标题", "content": "该章节 2~4 句要点"}; 5~15 个, 按 start 升序, 覆盖整个视频。',
-            'overview (字符串): 对整个视频的 3~5 句概括。',
+            'sections (数组): 每项 {"start": 章节开始秒数(数字), "end": 章节结束秒数(数字), "title": "简短章节标题", "content": "该章节 1~3 句要点"}; 5~12 个, 按 start 升序, 覆盖整个视频。',
+            'overview (字符串): 对整个视频的 2~4 句概括, 不超过 120 字。',
         );
     }
     reqs.push("start/end/from/to 必须取自字幕行的时间戳, 不得虚构。只输出 JSON。");
@@ -144,13 +144,30 @@ export async function generateCombined(
     scope: CombinedScope,
     onPartial?: (partial: Partial<CombinedResult>) => void,
 ): Promise<CombinedResult> {
-    const json = (await chatJsonStream(combinedMessages(meta, transcript, scope), {
-        onPartialText: (text) => {
-            if (!onPartial) return;
-            const partial = extractCombinedSoFar(text, scope);
-            if (Object.keys(partial).length > 0) onPartial(partial);
-        },
-    })) as Record<string, unknown>;
+    // 流式过程中增量提取到的已闭合内容; 最终 JSON 解析失败 (如 kimi 单条输出
+    // 超限被截断) 时用它兜底, 保证"广告+总结一个请求"尽量成功而不是降级多请求
+    let lastPartial: Partial<CombinedResult> = {};
+    let json: Record<string, unknown>;
+    try {
+        json = (await chatJsonStream(
+            combinedMessages(meta, transcript, scope),
+            {
+                onPartialText: (text) => {
+                    const partial = extractCombinedSoFar(text, scope);
+                    if (Object.keys(partial).length === 0) return;
+                    lastPartial = partial;
+                    onPartial?.(partial);
+                },
+            },
+        )) as Record<string, unknown>;
+    } catch (error) {
+        const salvaged = lastPartial;
+        const hasAds = (salvaged.ads?.length ?? 0) > 0;
+        const hasSummary =
+            (salvaged.sections?.length ?? 0) > 0 || Boolean(salvaged.overview);
+        if (!hasAds && !hasSummary) throw error;
+        json = salvaged as Record<string, unknown>;
+    }
 
     const sections = scope.summary ? normalizeSections(json) : [];
     const overview = scope.summary

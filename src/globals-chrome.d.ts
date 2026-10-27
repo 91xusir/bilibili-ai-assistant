@@ -4,6 +4,9 @@ declare namespace chrome {
         /** 扩展环境中存在, 网页环境中为 undefined */
         const id: string | undefined;
 
+        /** 异步 API / 端口断开的最后错误; 在回调或 onDisconnect 里读取即视为"已检查" */
+        const lastError: { message?: string } | undefined;
+
         interface Port {
             name: string;
             postMessage(message: unknown): void;
@@ -100,6 +103,8 @@ declare namespace chrome {
         }): Promise<Tab>;
         function get(tabId: number): Promise<Tab>;
         function remove(tabId: number): Promise<void>;
+        /** 按 URL 匹配查找标签页 (复用用户已打开的 kimi.com 页面) */
+        function query(info: { url: string }): Promise<Tab[]>;
         function sendMessage(
             tabId: number,
             message: unknown,

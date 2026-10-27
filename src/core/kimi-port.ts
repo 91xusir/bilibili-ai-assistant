@@ -72,6 +72,7 @@ export function kimiChatStream(
             }
         });
         port.onDisconnect.addListener(() => {
+            void chrome.runtime.lastError; // bfcache 断开时必须读取, 否则控制台报错
             if (!activePorts.has(port)) return; // 已正常收尾
             cleanup();
             reject(new Error("与扩展后台的连接已断开"));

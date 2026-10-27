@@ -130,6 +130,10 @@ if (typeof chrome !== "undefined" && chrome.runtime?.id) {
 }
 
 function registerAiProxy(port: chrome.runtime.Port): void {
+    // 页面进 bfcache/导航导致的端口断开: 读取 lastError 避免控制台 Unchecked 报错
+    port.onDisconnect.addListener(() => {
+        void chrome.runtime.lastError;
+    });
     let controller: AbortController | null = null;
     let abortedByTimeout = false;
     let timeoutTimer: ReturnType<typeof setTimeout> | null = null;
@@ -200,6 +204,9 @@ function registerAiProxy(port: chrome.runtime.Port): void {
 }
 
 function registerKimiChat(port: chrome.runtime.Port): void {
+    port.onDisconnect.addListener(() => {
+        void chrome.runtime.lastError;
+    });
     let controller: AbortController | null = null;
 
     port.onMessage.addListener((raw: KimiPortMessage) => {

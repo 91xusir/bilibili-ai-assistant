@@ -417,6 +417,8 @@ export async function main(): Promise<void> {
     });
 
     binder.start();
+    // 页面进入 bfcache / 卸载时主动断开后台端口, 避免 "message channel is closed" 报错
+    window.addEventListener("pagehide", () => abortAllAiRequests());
     void handlePage();
     onRouteChange(() => void handlePage());
     log("已启动");
