@@ -9,9 +9,7 @@
 
 > **AI agents:** If you are an AI agent planning to do secondary development, read [DEVELOPMENT.md](./DEVELOPMENT.md) first before making any changes.
 
-<div align="center">
-  <img src="readme/screenshot.png" alt="Bilibili AI 视频助手面板：视频总结标签页，右下角为导出与重新生成悬浮按钮" width="450">
-</div>
+
 
 ## 用法
 
@@ -26,6 +24,9 @@
 
 工具栏图标点开是开关面板（自动总结 / 识别广告 / 自动跳过 / 点击行为 / 缓存），「完整设置」里有 AI 接口配置和缓存管理。
 
+<div align="center">
+  <img src="readme/screenshot.png" alt="Bilibili AI 视频助手面板：视频总结标签页，右下角为导出与重新生成悬浮按钮" width="350">
+</div>
 
 ## License
 

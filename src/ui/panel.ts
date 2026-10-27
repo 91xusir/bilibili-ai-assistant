@@ -38,7 +38,7 @@ export interface PanelCallbacks {
 }
 
 const TASK_IDS: TaskId[] = ["summary", "ads"];
-const AD_BANNER_DURATION = 3_000;
+const AD_BANNER_DURATION = 10_000;
 
 export class Panel {
     private root: HTMLElement | null = null;
@@ -401,7 +401,7 @@ export class Panel {
         actions.append(followButton, adButton);
         header.append(tabs, actions);
 
-        // 广告确认横幅: 自动跳过关闭时, 播放到广告段提示是否跳过 (3s 自动关闭)
+        // 广告确认横幅: 自动跳过关闭时, 播放到广告段提示是否跳过 (10s 自动关闭)
         this.adBanner = el("div", "bia-ad-banner");
         const bannerText = el("span", "bia-ad-banner-text");
         const bannerSkip = el(
@@ -492,7 +492,7 @@ export class Panel {
         return wrap;
     }
 
-    /** 广告确认横幅: 同一广告段只提示一次; 3s 无操作自动关闭后同段不再打扰. */
+    /** 广告确认横幅: 同一广告段只提示一次; 10s 无操作自动关闭后同段不再打扰. */
     showAdConfirm(
         ad: AdSegment,
         skip: (seekTarget: number) => void,

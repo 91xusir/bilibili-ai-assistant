@@ -105,7 +105,7 @@ function exportSummary(): void {
 /**
  * 播放到广告片段:
  * - 自动跳过开启 → 直接 seek 到片段尾 + toast
- * - 关闭 → 面板横幅提示 (3s 自动关闭); 离开广告段自动收起
+ * - 关闭 → 面板横幅提示 (10s 自动关闭); 离开广告段自动收起
  */
 function maybeHandleAd(time: number): void {
     const ads = panel.getAds();
