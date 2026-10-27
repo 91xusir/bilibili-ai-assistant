@@ -234,32 +234,44 @@ async function refreshAccessToken(): Promise<string> {
         if (!data?.access_token || !data?.refresh_token) return false;
         accessToken = data.access_token;
         storageSet(ACCESS_TOKEN_KEY, data.access_token);
+        // kimi 轮换式刷新: 每次会返回新的 refresh_token, 一并更新
         storageSet(REFRESH_TOKEN_KEY, data.refresh_token);
         return true;
     };
 
-    // 1) 后台直连
-    try {
-        const resp = await fetch(`${KIMI_BASE}/api/auth/token/refresh`, {
-            method: "GET",
-            headers: { Authorization: `Bearer ${refreshToken}` },
-            credentials: "include",
-        });
-        if (resp.ok && applyTokens(await resp.json())) {
-            return accessToken!;
+    /** 直连优先, 失败回退页面内执行 (同源 Cookie). */
+    const attempt = async (): Promise<boolean> => {
+        try {
+            const resp = await fetch(`${KIMI_BASE}/api/auth/token/refresh`, {
+                method: "GET",
+                headers: { Authorization: `Bearer ${refreshToken}` },
+                credentials: "include",
+            });
+            if (resp.ok && applyTokens(await resp.json())) return true;
+        } catch {
+            /* 回退到页面内执行 */
         }
-    } catch {
-        /* 回退到页面内执行 */
+        try {
+            const pageData = await refreshAccessTokenInPage(refreshToken);
+            return applyTokens(pageData);
+        } catch {
+            return false;
+        }
+    };
+
+    if (await attempt()) return accessToken!;
+
+    // 本地 refresh_token 可能已在别处被轮换失效: 回 kimi.com 页面重读
+    // localStorage 里最新的 refresh_token 再试一次 (即"到期重新从页面获取")
+    const fresh = await loadRefreshTokenFromPage();
+    if (fresh && fresh !== refreshToken) {
+        refreshToken = fresh;
+        if (await attempt()) return accessToken!;
     }
 
-    // 2) 页面内执行 (同源, 自动带 Cookie/Referer); 用完关闭临时页
-    const pageData = await refreshAccessTokenInPage(refreshToken);
-    if (!applyTokens(pageData)) {
-        throw new Error(
-            "kimi 登录凭据已失效: 请打开 kimi.com 重新登录后, 到「设置」点击「重新获取授权」",
-        );
-    }
-    return accessToken!;
+    throw new Error(
+        "kimi 登录凭据已失效: 请打开 kimi.com 重新登录后, 到「设置」点击「重新获取授权」",
+    );
 }
 
 async function ensureAccessToken(): Promise<string> {
