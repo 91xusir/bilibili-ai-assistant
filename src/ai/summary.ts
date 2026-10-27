@@ -80,10 +80,12 @@ export async function generateSummary(
             });
         };
         for (let index = 0; index < chunks.length; index++) {
+            const chunk = chunks[index];
+            if (!chunk) continue;
             const json = (await chatJson(
                 partialSummaryMessages(
                     meta,
-                    buildTranscript(chunks[index]),
+                    buildTranscript(chunk),
                     index + 1,
                     chunks.length,
                 ),

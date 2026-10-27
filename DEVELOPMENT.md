@@ -1,249 +1,129 @@
-# 二次开发指南
+# DEVELOPMENT — 面向 AI 智能体的二次开发说明
 
-面向需要扩展、改造本项目功能的开发者。目标读者:熟悉 TypeScript + 浏览器扩展,了解油猴/内容脚本模型。
+> 本文档写给在本仓库工作的 AI 智能体（和人类协作者）。目标是让任何一次修改都能对齐既有架构、存储键与坑位清单，避免重新踩坑。
 
-## 1. 快速上手
-
-```bash
-bun install        # 安装依赖(仅 dev 依赖: typescript / vitest)
-bun run typecheck  # 类型检查
-bun run test       # 跑单测
-bun run build      # 构建到 dist/
-bun run dev        # watch 模式, 改代码自动重建
-```
-
-产物:`dist/` = `content.js` + `service-worker.js` + `manifest.json`。开发时在 `chrome://extensions` 开启「开发者模式」→「加载已解压的扩展程序」选 `dist/`,**改代码后点扩展卡片上的 ↻ 即可热更新**(B站视频页需刷新)。
-
-## 2. 架构总览
-
-```
-┌─ dist/manifest.json ───────────────────────────────────────┐
-│ content_scripts: https://www.bilibili.com/video/* → content.js
-│ background: service_worker.js                              │
-│ host_permissions: https://*/*   permissions: storage,scripting,tabs
-└────────────────────────────────────────────────────────────┘
-
-[内容脚本 content.js]                       [后台 service-worker.js]
-  UI 面板 / 字幕获取 / 视频绑定 / AI 编排        流式代理 + Kimi 客户端
-        │  chrome.runtime.connect(name)              │
-        ├─ "bia-ai"  ──OpenAI兼容 HTTP 代理──────►  fetch + ReadableStream
-        ├─ "bia-kimi" ─ Kimi 对话─────────────────►  kimi.com (免 Key)
-        └─ runtime.onMessage("kimi-auth") ─────────►  token 引导/刷新
-```
-
-**两条网络通道**
-
-| 通道 | 用途 | 流式方式 |
-| --- | --- | --- |
-| `bia-ai` Port | 任意 OpenAI 兼容接口 | 后台 `fetch` + `ReadableStream`,每块回传累积文本 |
-| `bia-kimi` Port | kimi.com 网页版 | 后台直连 SSE(20s 无数据看门狗);401/网络类失败才回退到 kimi.com 页面内执行(ISOLATED world,同源 Cookie + `chrome.runtime`) |
-| `bia-ai` 端口(含 credentials) | B站字幕链路 (view / player / 字幕 CDN) | 后台带 Cookie 请求, 内容脚本零 fetch |
-
-**Kimi 可靠性要点**(`background/kimi-client.ts`)
-
-- **标签页只有两种**:授权引导走 `readLocalStorageOnce`(打开 → 读完 → `tabs.remove` 关闭,不留垃圾页);页面内流式回退走 `ensureKimiTab`(最多 1 个常驻页,并发去重 + 用户关闭后重建)。任何路径都不允许重复开页
-- **直连必须设读超时**:kimi 网页接口可能拒绝后台直连且**不回响应体**,旧实现会让请求永久挂起 → 内容脚本 20s 心跳与计时器堆积 → SW 反复重启 → 表现为不断打开新 kimi 标签页、无流式。现 `streamKimiChat` 每次尝试带 20s 无数据看门狗
-- **parser 每次尝试独立**:失败重试若复用 parser,前一次的 `cursor/acc/done` 会污染本次,导致第二次结果「一次性出现」而非流式
-- **回退策略**:模型业务错误(`KimiError`)与非 401 的 4xx 直接抛出,不做无谓重试;仅网络类错误进入页面回退,退避重试(0s/1s/3s)复用同一常驻页
-- **会话自动清理**:`streamKimiChat` 记录本次创建的 chatId,生成完成后经 apiv2 `BatchDeleteChats`(带盾头 `_fmOpt.getinfo()`,从一次性临时页读取)批量删除,避免污染 kimi 聊天列表
-- **UI 自适应**:面板宽度跟随 `.video-pod-above-modules`(ResizeObserver);主题跟随 `body.theme-dark`(存在即深色,否则浅色,MutationObserver 监听);头部有弹幕列表同款折叠头(收起仅留一行)
-
-**两条数据链**
-
-1. 字幕数据:B站 `view` API 取 cid → `player/wbi/v2` 取字幕轨 → fetch 字幕 JSON
-2. AI 输出:SSE 分片 → 累积纯文本 → **增量 JSON 提取**(`streamJson.ts` 只取已闭合对象)→ 节流渲染 → 完成后整体解析 + 时间吸附(`snapTime`)
-
-## 3. 模块地图
-
-| 目录 | 文件 | 职责 |
-| --- | --- | --- |
-| `entries/` | `content.ts` | 入口,仅 `import { main }` |
-| `background/` | `service-worker.ts` | Port 路由、流式代理、`kimi-auth` 消息、工具栏图标 |
-| | `pump.ts` | `ReadableStream` 逐块读取 + `TextDecoder` 流式解码 |
-| | `kimi-client.ts` | Kimi:token 生命周期 / 会话创建 / SSE 解析器 / 页面回退 |
-| `core/` | `storage.ts` | `chrome.storage.local` 同步缓存(水合 + 写穿) |
-| | `net.ts` | `platformRequest`:后台流式 Port 客户端(含 20s 保活 ping) |
-| | `kimi-port.ts` | 内容侧 Kimi 客户端 + `kimiAuthBootstrap` |
-| | `dom.ts` | `waitForElement` |
-| | `route.ts` | SPA 路由变化(Navigation API + history 劫持降级) |
-| | `video.ts` | `<video>` 绑定 / seek / 3s 重绑轮询 |
-| | `download.ts` | Blob 下载 + 文件名安全化 |
-| `config/` | `settings.ts` | AI 设置 / 任务开关 / 缓存开关 / `isCacheExpired` |
-| `api/` | `bilibili.ts` | 字幕数据链 + `getVideoId` |
-| | `ai.ts` | `chatJson` / `chatJsonStream` / 重试 / `abortAllAiRequests` |
-| | `streamJson.ts` | 流式增量 JSON 提取(括号配对 + 字符串感知) |
-| `ai/` | `prompt.ts` | 提示词 + `chunkTranscript` + `sectionsToTranscript` |
-| | `summary.ts` | 总结(单段流式 / 超长 map-reduce) |
-| | `mindmap.ts` | 思维导图(流式节点) |
-| | `adDetect.ts` | 广告片段识别 (分任务/降级路径) |
-| | `combined.ts` | 单次汇总: 一个请求产出总结+导图+广告 (scope 裁剪 / 流式部分渲染 / 校验降级) |
-| `ui/` | `panel.ts` | 面板容器/四标签页/设置表单(约 900 行,本项目最大文件) |
-| | `summaryView.ts` `mindmapView.ts` `timelineView.ts` | 三个内容视图 + 导出按钮 |
-| | `exporters.ts` | 内容 → Markdown |
-| | `common.ts` `toast.ts` `style.ts` | 通用渲染原子 / 提示 / CSS |
-| `subtitle/` | `index.ts` | 时间格式化 / 二分定位 / 时间吸附 |
-| `main.ts` | | 生命周期编排:路由 → 面板 → 字幕 → AI 任务/缓存 |
-
-## 4. 数据流与生命周期
-
-### 页面进入
-
-```
-handlePage()                     ← 路由变化或首次加载
-  ├─ getVideoId()                ← 从 URL 取 BV/av + 分P
-  ├─ 比对 currentPageKey, 未变化 → 只重挂面板
-  ├─ abortAllAiRequests()        ← 中止上一页残留请求
-  ├─ ensurePanelMounted()        ← 等待 .right-container, 插入弹幕列表上方
-  ├─ panel.setSubtitleLoading()
-  ├─ getSubtitleDoc(videoId)     ← view → player → 字幕 JSON
-  ├─ 有字幕 → panel.setDoc(doc)
-  └─ runAiTasks(token, doc, force=false)
-```
-
-### AI 任务编排(`main.ts: runAiTasks`)
-
-```
-1. 读缓存: storageGet(aiCacheKey(bvid, cid, model))
-   ├─ 过期(isCacheExpired) → storageDelete + 继续
-   └─ 命中 → panel.applyResult(cached, toggles) → return
-2. 未配置/已关闭的任务 → panel.setTasksIdle / setTasksLoading(toggles)
-3. 单次汇总 (combinedTasks=true, 默认): generateCombined(scope, onPartial)
-   ├─ 一次请求产出 sections/overview/children/ads
-   ├─ panel.setSummaryPartial / setMindmapPartial / setAds 随流渐进
-   └─ 失败 → 降级 runSeparateTasks (同下 4~6), 保证用户仍能拿到结果
-4. 分任务模式 (combinedTasks=false, 或降级): 并行 detectAds() → panel.setAds
-5. 分任务模式: 顺序 generateSummary → generateMindmap → 各自 setTaskError 只影响单任务
-6. 汇总: 至少一项成功 → storageSet(cacheKey, {..., savedAt: Date.now()})
-```
-
-**会话数对比 (Kimi)**:单次汇总 = 每视频 1 个会话;分任务 = 3~5 个 (广告分块会额外建会话)。设置页「AI 任务」区的「单次汇总」开关可切换。
-
-**Token 防串**:每次 `handlePage` 生成 `++runToken`;异步回调里 `if (token !== runToken) return;` 丢弃过期结果。
-
-### 视频同步与跳转
-
-```
-<video> timeupdate → VideoBinder → panel.setCurrentTime(t)
-                                   ├─ timelineHandle.update(t)  ← 二分查找高亮当前行
-                                   └─ followEnabled → scrollToCurrentRow()
-用户滚动时间轴 → onBodyScroll() → setFollowState(false)   ← 250ms 抑制窗口防误判
-点击行/章节/导图节点 → onSeek → video.currentTime = t
-播放进入广告段 → seek 到段尾 + toast
-```
-
-### 面板渲染
-
-`panel.renderActive()` 按 `activeTab` 只重绘当前视图;**「设置」视图只构建一次**(表单状态靠 DOM 持久化);`throttledRender`(400ms)用于 AI 流式部分结果,避免逐 token 重绘。任务状态机:`idle → loading → done | error | disabled`。
-
-## 5. 如何添加一个 AI 服务商
-
-以「DeepSeek 官方 API」为例(它本身兼容 OpenAI 格式,只需在配置里填地址即可;以下展示若需全新协议时的完整步骤):
-
-**步骤 1 — 类型**(`types.ts`)
-```ts
-export type AiProvider = "kimi" | "openai" | "deepseek";
-```
-
-**步骤 2 — 请求实现**(`api/ai.ts`)
-- 若协议为 OpenAI 兼容:无需新代码,用户填 `https://api.deepseek.com/v1` 即可
-- 若协议不同:参照 `kimiChatStream` 的形状实现 `providerChatStream(messages, onPartialText): Promise<{plain, raw}>`,后台新开一个 Port 或扩展 `registerKimiChat` 分支
-
-**步骤 3 — 路由**(`api/ai.ts`)
-```ts
-function isKimiProvider() { return getAiSettings().provider === "kimi"; }
-// 在 chatJson / chatJsonStream / testAiConnection 三个入口分支
-if (getAiSettings().provider === "deepseek") { ... return extractJson(plain); }
-```
-
-**步骤 4 — 后台**(`background/service-worker.ts`)
-在 `chrome.runtime.onConnect` 中增加端口分支,或复用 `bia-ai` 端口并在 SW 里区分 `provider` 字段。
-
-**步骤 5 — 设置 UI**(`ui/panel.ts: buildSettingsView`)
-在「AI 服务商」`providerRow` 里加第三个按钮,`renderProvider()` 里处理显隐。
-
-**步骤 6 — 配置项**(若需新字段,如 `apiKey` 外的 `region`)
-`types.ts` 的 `AiSettings` + `config/settings.ts` 的 `DEFAULT_AI_SETTINGS` + 设置表单 `makeField` 一行。
-
-> 通用约束:`chatJson`/`chatJsonStream` 必须返回 **JSON**;所有 AI 输出经 `snapTime` 吸附到真实字幕时间,避免模型编造时间导致跳转失效。
-
-## 6. 如何修改提示词
-
-`ai/prompt.ts` 集中管理,注意两个约束:
-
-1. **JSON 键序即输出顺序**:`sections` 必须排在 `overview` 之前——流式渲染靠 `extractArrayItemsSoFar(text, "sections")` 边生成边取,顺序错了首屏会空转
-2. **system 角色**:Kimi 不支持 system role,`toKimiMessages` 会把它并入首条 user;OpenAI 侧正常使用
-
-修改 `prompt.ts` 后建议同步更新 `tests/prompt.test.ts` 的分块断言(若涉及分块逻辑)。
-
-## 7. 缓存模型
-
-```ts
-// 键: bia:ai-cache:{bvid}:{cid}:{model}
-{ summary?, mindmap?, ads?, savedAt }
-```
-
-- 开关:`AiSettings.cacheEnabled`(false 时既不读也不写)
-- TTL:`AiSettings.cacheTtlHours`(0 = 永久);**惰性删除**:读到过期条目立即 `storageDelete` 并重新生成
-- 不同模型缓存互相隔离;任务开关决定哪些任务读/写缓存
-
-改缓存逻辑的入口:`main.ts: runAiTasks` 的读缓存段 + 末尾写缓存段 + `config/settings.ts: isCacheExpired`。
-
-## 8. UI 修改指南
-
-- **颜色/圆角/尺寸**:`ui/style.ts` 顶部的 `.bia-panel` CSS 变量(`--bia-bg` 等),面板固定 411×380
-- **新增标签页**:`types.ts` 的 `TabId` → `panel.ts` 的 `tabDefs` / `viewRoots` / `renderActive()` 三处各加一项
-- **新增设置项**:在 `buildSettingsView` 对应区块加 `makeField` 或 `buildSwitchRow`(即时保存);`saveAiSettings(patch)` 是 **Partial 合并**,只需传变化字段
-- **导出格式**:`ui/exporters.ts`;视图里加按钮参照 `summaryView.ts` 的 `export-row` 块
-
-## 9. 关键约束与坑
-
-1. **MV3 Service Worker 生命周期**:长请求靠内容脚本每 20s ping 保活;新增长任务务必走 `platformRequest`(带 ping),不要直接在 SW 里裸 `fetch`
-2. **CSP**:内容脚本执行于页面上下文,不加载任何远程脚本;`injectStyle` 用 `<style>` 标签
-3. **CORS**:AI 请求必须经后台 SW(有 `host_permissions`),不要在内容脚本里直连外部 API
-4. **文本框密码误报**:API Key 输入用 `type="text"` + `-webkit-text-security: disc`,不能用 `type="password"`
-5. **label 转发**:包含下拉选项的容器不能用 `<label>`(点击会被转发到关联控件)
-6. **时间可信度**:AI 给的秒数一律经 `snapTime` 吸附到字幕行,容差 90s
-7. **bilibili 布局**:`.right-container-inner` 被设了 `pointer-events: none`,面板必须显式 `pointer-events: auto`
-8. **SPA 导航**:切换视频时 `++runToken` + `abortAllAiRequests()`;面板若被 React 重绘移除,`handlePage` 只重挂载不重新分析
-9. **新增持久化数据**:`storageSet`/`storageGet`(`chrome.storage.local`);扩展环境内容脚本读的是内存缓存,启动时 `storageHydrate` 全量水合
-
-## 10. 测试
-
-`tests/` 下 vitest 单测覆盖纯函数:流式提取、SSE 解析、字幕时间、缓存 TTL、提示词分块、导出模板、流式泵解码。
+## 0. 命令
 
 ```bash
-bun run test
+bun install          # 安装依赖 (零运行时依赖, 仅 @types/bun + typescript)
+bun run build        # 构建产物 → dist/ (content.js / service-worker.js / popup.js / options.js / manifest.json / popup.html / options.html / pages.css)
+bun run typecheck    # tsc --noEmit (严格模式, noUncheckedIndexedAccess)
+bun test             # bun 单元测试, 用例在 tests/ (只测纯逻辑, 不测 chrome API)
 ```
 
-无法在单测里覆盖的(需要真实扩展环境):后台 Port 通信、Kimi token 引导、面板 DOM 交互。建议改完后在本机 Chrome 加载 `dist/` 手动验证:进入带 CC 字幕的视频 → 看三个标签页 → ⟳ 重新生成 → 检查 `chrome://extensions` 该扩展的「service worker」控制台 `[bia]` 日志。
+修改后至少跑 `typecheck + test + build`。真实页面验证用 chrome-devtools MCP：重载扩展（reload_extension）→ 刷新 B 站视频页 → 检查面板/弹窗/选项页，**不要用代码 mock 浏览器行为**。
 
-## 11. 常见改造清单
+## 1. 架构总览（MV3, 三类上下文）
 
-| 需求 | 改哪里 |
+```
+bilibili.com 视频页                       Service Worker (后台)               扩展页面
+┌─────────────────────────┐   Port「bia-ai」  ┌──────────────────────┐   ┌──────────────────┐
+│ content.js (纯前端 UI)   │ ←───────────────→ │ fetch 代理 + 流式 pump │   │ popup.html/js    │
+│  panel/summary/timeline  │   Port「bia-kimi」 │ kimi 网页版客户端      │←─→│ options.html/js  │
+│  设置经 storageHydrate   │   sendMessage      │ 字幕 IndexedDB 缓存   │   │ (同源直读 IDB)   │
+└─────────────────────────┘   「bia-cache」    └──────────────────────┘   └──────────────────┘
+```
+
+- **内容脚本零网络请求**：B 站 API、字幕 CDN、AI 请求全部经 SW（`core/net.ts` 的 `platformRequest` 走 Port「bia-ai」）。SW 用原生 `fetch` + `ReadableStream`（`background/pump.ts`）把累积文本经 `progress` 消息回传，实现真流式。
+- **Kimi 网页版**（`background/kimi-client.ts`）：localStorage `refresh_token` → `/api/auth/token/refresh` → access_token；apiv2 创建/删除会话（BatchDeleteChats, 50/批）；流式 SSE 事件 `cmpl/content/error/all_done`。直连失败回退页面内执行（临时标签页读 shield token；常驻标签页复用, tab id 存 `chrome.storage.session`）。
+- **任务完成自动清理 kimi 会话**：`trackKimiChatId` 记录 → `drainKimiChatIds` 取走 → `deleteKimiChats`。会话 id 列表也持久化到 `chrome.storage.session`。
+
+## 2. 模块地图
+
+| 路径 | 职责 |
 | --- | --- |
-| 改面板宽高 | `ui/style.ts` 的 `.bia-panel` |
-| 改标签名称/顺序 | `types.ts: TabId` + `panel.ts: tabDefs` |
-| 改总结/导图输出结构 | `ai/prompt.ts` + `ai/summary.ts` `mindmap.ts` 的 normalize 函数 + `streamJson.ts` 的 key |
-| 改广告识别策略 | 单次汇总: `ai/combined.ts`; 分任务: `ai/prompt.ts: adMessages` + `ai/adDetect.ts` |
-| 改单次汇总输出结构 | `ai/combined.ts` 的 scope/要求/normalize, 注意字段顺序 (children 在 ads 前) |
-| 改广告跳过行为 | `main.ts: maybeSkipAd` |
-| 改时间轴虚拟化(超长视频) | `ui/timelineView.ts`(当前一次性渲染全部行) |
-| 改导出格式(JSON/HTML) | `ui/exporters.ts` |
-| 加新页面(如"分镜") | 见 §8 新增标签页 |
-| 改默认 AI 服务商 | `config/settings.ts: DEFAULT_AI_SETTINGS` |
+| `src/main.ts` | 编排器：页面生命周期、任务调度 `runAiTasks(mode: auto/refresh/ads-only)`、缓存读写、广告处理（自动跳过 / 确认横幅）、剪贴板、storage.onChanged 同步 |
+| `src/config/settings.ts` | 设置读写（chrome.storage.local 同步水合层）、`resolveTaskPlan`（功能开关 → 任务计划, 纯函数）、`aiCacheKey`、TTL、旧键清理 |
+| `src/types.ts` | 全部类型（SubtitleDoc/SummaryResult/AdSegment/AiSettings/FeatureSettings/TaskPlan…） |
+| `src/api/bilibili.ts` | view → player/wbi/v2 → 字幕 CDN 三段取数 + 字幕清洗；`getVideoId`/`videoKey`（缓存键） |
+| `src/api/ai.ts` | OpenAI 兼容客户端：requestOnce / requestStream（SSE 增量解析）/ fetchModelList / testAiConnection / 思考等级参数适配（bigmodel/qwen/openrouter/其余 reasoning_effort） |
+| `src/api/streamJson.ts` | 流式增量 JSON 提取（`extractArrayItemsSoFar` 平衡括号 + 字符串感知；`extractStringField`） |
+| `src/ai/combined.ts` | 合并请求（总结+广告一次完成）。**ads 提示词必须最前** → 流式最先返回广告；`extractCombinedSoFar` 按 ads→sections→overview 顺序提取 |
+| `src/ai/summary.ts` | 单独总结：短视频单次流式；长视频 `chunkTranscript` 分块 map-reduce |
+| `src/ai/adDetect.ts` / `src/ai/adHit.ts` | 单独广告识别（分块并行）；`findAdHit(ads, time)` 命中判定（自动跳过与横幅共用, 纯函数） |
+| `src/ai/prompt.ts` | 全部提示词构建 |
+| `src/subtitle/index.ts` | formatTime / findCurrentIndex（二分）/ snapTime（AI 时间吸附到字幕行 ±90s） |
+| `src/ui/panel.ts` | 面板壳：两标签（视频总结/时间轴）、头部 ⊙ 跟随 + ⊘ 自动跳过、状态栏、FAB 组（⟳ 重新生成 + ⤓ 导出菜单）、广告确认横幅、主题/宽度自适应 observer |
+| `src/ui/summaryView.ts` / `timelineView.ts` | 两个视图渲染（每次全量重绘, 时间轴返回 update 句柄做高亮）；点击行为由 `clickAction` 决定, **时间徽章始终 seek** |
+| `src/ui/exporters.ts` / `src/core/download.ts` | 总结 → Markdown 导出 |
+| `src/ui/widgets.ts` | Popup/Options 共用开关行、分段选择 |
+| `src/ui/style.ts` | 面板全部 CSS（`--bia-*` 变量, `data-theme="light|dark"`, 宽度 `--bia-panel-width`） |
+| `src/core/storage.ts` | chrome.storage.local 同步水合缓存（storageHydrate 全量读 → 内存 Map + 写穿）、`watchStorageChanges`（onChanged → 更新内存）、storageKeys |
+| `src/core/cache-port.ts` | 内容脚本 ↔ SW 字幕缓存消息（get/put/delete） |
+| `src/core/net.ts` / `kimi-port.ts` | Port 客户端（20s ping 保活, abort 句柄） |
+| `src/core/video.ts` | `<video>` 绑定, 3s 轮询重绑（B 站播放器会重建） |
+| `src/core/route.ts` | SPA 路由（Navigation API 优先, 劫持 history 降级） |
+| `src/background/service-worker.ts` | Port 路由（bia-ai/bia-kimi）、一次性消息（kimi-auth / bia-cache）、启动时惰性清理过期字幕缓存 |
+| `src/background/subtitle-db.ts` | **SW 侧** IndexedDB（库 `bia-cache` / store `subtitles`）：get/put/delete/deleteAll/list(游标)/deleteExpired |
+| `src/entries/popup.ts` / `options.ts` | 弹窗（仅开关）与选项页（完整设置 + 缓存管理）；复用 `config/settings.ts` + `ui/widgets.ts` |
+| `extension/` | manifest.json 模板（`{{VERSION}}`）、popup.html / options.html / pages.css |
+| `build.ts` | bun build（iife, minify, 4 个入口）+ 拷贝 html/css + 版本号注入 |
+| `tests/` | 7 个测试文件：streamJson / prompt / combined / subtitle / settings / adHit / exporters |
 
-## 12. 目录与发布
+## 3. 存储键清单（改键名前必读）
+
+**chrome.storage.local**（内容脚本经同步水合层读写；popup/options 直写后靠 onChanged 同步）：
+
+| 键 | 内容 |
+| --- | --- |
+| `bia:ai-settings` | AiSettings：provider(kimi/openai)/baseUrl/apiKey/model/reasoningEffort/cacheEnabled/cacheTtlHours |
+| `bia:feature-settings` | FeatureSettings：autoSummary/detectAds/autoSkipAds(默认全 true)/clickAction("jump"\|"copy") |
+| `bia:ai-cache:{videoKey}` | AiCacheEntry `{summary: SummaryResult\|null, ads: AdSegment[]\|null, savedAt}`。**ads: null=从未识别过；[]=识别过无广告**（写缓存只覆盖本次生成的部分） |
+| `bia:kimi-refresh-token` / `bia:kimi-access-token` | kimi 登录凭据 |
+
+**chrome.storage.session**（SW 回收后仍保留, 浏览器关闭清空）：`bia:kimi-tab-id`（常驻 kimi 标签页）、`bia:kimi-pending-chat-ids`（待删会话）。**SW 里任何跨事件的内存状态都必须落到 session**, 内存变量只作镜像。
+
+**IndexedDB（SW 扩展源）**：库 `bia-cache` / store `subtitles`, key = `videoKey`（如 `BV1xxx?p=2`）, value = `{doc: SubtitleDoc, savedAt}`。**不要把字幕缓存放进内容脚本**——内容脚本的 IDB 属于 bilibili 页面源, 选项页读不到（缓存管理就废了）。
+
+`videoKey = videoKey(getVideoId())` = `"BVxxx?p=N"`（av 号视频为 `avN?p=N`）。字幕缓存与 AI 结果缓存用同一个键。
+
+## 4. 任务调度（main.ts）
 
 ```
-bilibili-ai-assistant/
-├── extension/manifest.json   # MV3 manifest 模板({{VERSION}} 由构建注入)
-├── src/                      # 源码(见 §3)
-├── tests/                    # vitest 单测
-├── build.ts                  # Bun 构建: content.js + service-worker.js + manifest.json
-├── dist/                     # 构建产物 (git 忽略建议保留目录)
-├── package.json
-├── vitest.config.ts
-└── README.md / DEVELOPMENT.md
+resolveTaskPlan({autoSummary, detectAds, autoSkipAds}):
+  ads 生效 = detectAds || autoSkipAds        # 自动跳过依赖识别结果, 强制开启
+  mode = summary&&ads ? "combined" : summary ? "summary" : ads ? "ads" : "none"
 ```
 
-发版:改 `package.json` 的 `version` → `bun run build` → 分发 `dist/`(zip 后可直接提交 Chrome 应用商店,若需要)。
+- **auto**（进入视频）：读两层缓存 → 命中即应用（`applyResult`）→ 缺什么补什么：`needSummary = plan.summary && !cached.summary`；`needAds = plan.ads && cached.ads === null`。
+- **refresh**（⟳）：总结必跑（手动覆盖 autoSummary），广告按 plan 附带；两者都需 → `generateCombined` 单请求（Kimi 单会话），**失败自动降级**为 ads-first 分请求（长字幕各自分块）。
+- **ads-only**（时间轴「识别广告」按钮）：只跑 `detectAds`。
+- 生成中：`startGenerating` 置任务 loading → 状态栏出现、⟳ FAB 禁用+旋转、时间轴按钮禁用；结束/失败恢复。过期缓存读时惰性删除；写缓存只覆盖跑过的任务。
+
+## 5. 交互约定
+
+- **点击行为**：`clickAction = "jump" | "copy"`。时间徽章（`.bia-time-badge` / `.bia-tl-time`）点击 **必然 seek**（stopPropagation）；文本点击按设置跳转或复制（总结=点击章节的 content, 时间轴=点击行 content）。复制走 `navigator.clipboard.writeText` + toast。
+- **广告确认横幅**（`.bia-ad-banner`）：仅 autoSkipAds 关闭且广告已识别时出现。同一广告段只弹一次；3s 超时关闭后**同段不再弹出**（`dismissedAdFrom`, 否则 timeupdate 会让它每帧复活）；离开广告段（`findAdHit` 返回 null）时 `hideAdConfirm()` 重置。
+- **导出菜单**：Popover API + invoker commands（`commandfor`/`command="toggle-popover"`）。**目标元素必须设 `id`**（commandfor 按 id 关联）, 菜单紧跟触发器之后; 内层容器 `focusgroup="menu nomemory"`; CSS 用隐式锚点 `position-area: block-start span-inline-end`（FAB 在右下角, 菜单向上开）。不支持时降级为脚本 `showPopover()`。
+- **UI 统一**：右下角 `.bia-fab-stack`（列向 FAB 组）, 生成中 `bia-above-bar` 上浮避开状态栏。
+
+## 6. B 站适配坑位（改 DOM/主题相关代码前必读）
+
+1. `.right-container` 设了 `pointer-events: none` → 面板根必须显式 `pointer-events: auto`, 否则整体点击穿透。
+2. **深色模式标记在 `<html class="night-mode">`**, 不在 body。主题 observer 挂 `document.documentElement`, 写 `panel.dataset.theme`。
+3. 挂载点：`.right-container-inner.scroll-sticky` 内、`.video-pod-above-modules`（弹幕列表）之前；B 站 SPA 可能重建右栏 → `handlePage` 同 key 时检测 `panel.isMounted` 补挂载。
+4. 播放器 `<video>` 会被重建 → `VideoBinder` 3s 轮询重绑。
+5. 用户可能装 Bilibili Evolved（History API 拦截/参数清理）→ 路由事件比预期多, `handlePage` 必须幂等（同 key 早退）。
+6. 面板宽度跟随 `.video-pod-above-modules`（ResizeObserver → `--bia-panel-width`）。
+
+## 7. 扩展开发注意（chrome-extensions 指南要点）
+
+- SW 空闲 ~30s 被回收：跨事件状态用 `chrome.storage.session`；长任务期间 Port 客户端 20s ping 保活。**不要在 SW 内存里存唯一状态**。
+- 扩展页面（popup/options）禁内联 `<script>`/`eval`；脚本用 `<script src defer>`；`chrome.runtime.onMessage` 异步响应必须 `return true`。
+- Popup 出现后 `chrome.action.onClicked` 不再触发（manifest 已配 `default_popup`）, 不要再注册 onClicked。
+- 选项页用 `options_ui.open_in_tab: true`；弹窗用 `chrome.runtime.openOptionsPage()` 跳转。
+- API Key 输入框不用 `type=password`（防浏览器保存密码弹窗）, 用 text + `-webkit-text-security`。
+- `manifest.json` 的 `host_permissions: https://*/*` 是必须的（用户可配任意 OpenAI 兼容 Base URL + kimi.com + B 站）。
+
+## 8. 测试约定
+
+- `bun test` 只测**纯逻辑**（解析器、提示词、调度纯函数、命中判定、Markdown 构建），chrome API 用内存 mock（见 `tests/settings.test.ts`）。
+- 涉及 UI/网络/kimi 的验证一律走 chrome-devtools MCP 真机测试：重载扩展 → 刷新 `https://www.bilibili.com/video/*` 页 → 评估脚本检查 DOM/行为；SW 侧看 `serviceWorkerId` 的 console（`[bia][sw]` 前缀）。
+- 内容脚本日志前缀 `[bia]`，SW 日志前缀 `[bia][sw]`，都有中文语义化输出。
+
+## 9. 已知限制
+
+- 合并请求对超长字幕不分块（Kimi 上下文足够；失败会降级为分块的分任务路径）。
+- kimi 网页版依赖登录态，token 过期由 `ensureKimiAccessToken` 自动刷新（直连失败回退页面内读取）。
+- 字幕缓存按 `videoKey` 含分 P；同一视频切 P 各自缓存。
+- 广告识别靠字幕文本，无字幕视频无法工作（面板会提示「没有可用的 CC 字幕」）。

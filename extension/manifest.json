@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Bilibili AI 视频助手",
   "version": "{{VERSION}}",
-  "description": "AI 字幕分析: 视频总结 / 思维导图 / 时间轴, 支持自动跳过广告片段",
+  "description": "AI 字幕分析: 视频总结 / 时间轴, 广告识别与跳过",
   "permissions": [
     "storage",
     "scripting",
@@ -12,7 +12,12 @@
     "https://*/*"
   ],
   "action": {
+    "default_popup": "popup.html",
     "default_title": "Bilibili AI 视频助手"
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
   },
   "background": {
     "service_worker": "service-worker.js"

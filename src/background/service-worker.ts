@@ -3,6 +3,7 @@
  * - "bia-ai" 端口: 以原生 fetch + ReadableStream 转发 OpenAI 兼容请求 (流式)
  * - "bia-kimi" 端口: Kimi 网页版流式对话 (kimi-client, 免 Key)
  * - "kimi-auth" 一次性消息: 引导获取 kimi 登录凭据
+ * - "bia-cache" 一次性消息: 字幕缓存读写 (扩展源 IndexedDB, 选项页可直接读)
  */
 
 import { pumpResponseBody } from "./pump";
@@ -13,6 +14,13 @@ import {
     getKimiAuthState,
     streamKimiChat,
 } from "./kimi-client";
+import {
+    subtitleDelete,
+    subtitleGet,
+    subtitlePut,
+} from "./subtitle-db";
+import { getAiSettings } from "../config/settings";
+import { subtitleDeleteExpired } from "./subtitle-db";
 
 interface AiPortMessage {
     kind: "request" | "abort" | "ping";
@@ -43,6 +51,15 @@ function safePost(port: chrome.runtime.Port, message: unknown): void {
 if (typeof chrome !== "undefined" && chrome.runtime?.id) {
     console.info("[bia][sw] Service Worker 已启动", chrome.runtime.id);
 
+    // 启动时惰性清理过期字幕缓存 (TTL 取自设置, 0 = 永久)
+    void (async () => {
+        try {
+            await subtitleDeleteExpired(getAiSettings().cacheTtlHours);
+        } catch {
+            /* 缓存清理失败不影响功能 */
+        }
+    })();
+
     chrome.runtime.onConnect.addListener((port) => {
         if (port.name === "bia-ai") {
             registerAiProxy(port);
@@ -51,35 +68,64 @@ if (typeof chrome !== "undefined" && chrome.runtime?.id) {
         }
     });
 
-    // 工具栏图标点击 → 在当前视频页打开「设置」标签页
-    chrome.action.onClicked.addListener((tab) => {
-        if (tab.id === undefined) return;
-        void chrome.tabs
-            .sendMessage(tab.id, { kind: "bia-open-settings" })
-            .catch(() => {
-                /* 页面尚未注入内容脚本时忽略 */
-            });
-    });
+    // 工具栏图标打开 Popup (manifest default_popup), 无需 onClicked
 
-    // 设置页「重新获取授权」: 引导读取/刷新 kimi 登录凭据
+    // 一次性消息: kimi 授权引导 + 字幕缓存读写
     chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
-        if ((msg as { kind?: string } | null)?.kind !== "kimi-auth") return;
-        console.info("[bia][sw] kimi-auth 请求");
-        void (async () => {
-            try {
-                await ensureKimiAccessToken();
-                sendResponse?.({ ok: true, ...getKimiAuthState() });
-            } catch (error) {
-                const message =
-                    error instanceof Error ? error.message : String(error);
-                console.error("[bia][sw] kimi-auth 失败:", message);
-                sendResponse?.({
-                    ok: false,
-                    error: message,
-                });
-            }
-        })();
-        return true; // 异步 sendResponse
+        const kind = (msg as { kind?: string } | null)?.kind;
+        if (kind === "kimi-auth") {
+            console.info("[bia][sw] kimi-auth 请求");
+            void (async () => {
+                try {
+                    await ensureKimiAccessToken();
+                    sendResponse?.({ ok: true, ...getKimiAuthState() });
+                } catch (error) {
+                    const message =
+                        error instanceof Error ? error.message : String(error);
+                    console.error("[bia][sw] kimi-auth 失败:", message);
+                    sendResponse?.({
+                        ok: false,
+                        error: message,
+                    });
+                }
+            })();
+            return true; // 异步 sendResponse
+        }
+        if (kind === "bia-cache") {
+            const action = (msg as { action?: string }).action;
+            void (async () => {
+                try {
+                    if (action === "get") {
+                        const key = String((msg as { key?: string }).key ?? "");
+                        const hit = key ? await subtitleGet(key) : null;
+                        sendResponse?.(
+                            hit
+                                ? { ok: true, doc: hit.doc, savedAt: hit.savedAt }
+                                : { ok: false },
+                        );
+                    } else if (action === "put") {
+                        const key = String((msg as { key?: string }).key ?? "");
+                        const doc = (msg as { doc?: unknown }).doc;
+                        if (key && doc) await subtitlePut(key, doc as never);
+                        sendResponse?.({ ok: true });
+                    } else if (action === "delete") {
+                        const key = String((msg as { key?: string }).key ?? "");
+                        if (key) await subtitleDelete(key);
+                        sendResponse?.({ ok: true });
+                    } else {
+                        sendResponse?.({ ok: false });
+                    }
+                } catch (error) {
+                    console.warn(
+                        "[bia][sw] 字幕缓存操作失败:",
+                        error instanceof Error ? error.message : String(error),
+                    );
+                    sendResponse?.({ ok: false });
+                }
+            })();
+            return true;
+        }
+        return false;
     });
 }
 
@@ -176,7 +222,7 @@ function registerKimiChat(port: chrome.runtime.Port): void {
                 console.info(`[bia][sw] kimi 对话完成 (${plain.length} 字)`);
                 safePost(port, { kind: "done", plain });
                 // 生成完成: 自动删除本次会话, 避免污染 kimi 聊天列表
-                const chatIds = drainKimiChatIds();
+                const chatIds = await drainKimiChatIds();
                 if (chatIds.length > 0) {
                     deleteKimiChats(chatIds, controller!.signal)
                         .then((deleted) =>

@@ -1,13 +1,15 @@
 import { formatTime } from "../subtitle";
-import type { SubtitleDoc, SummaryResult, TaskState } from "../types";
-import { exportSummaryFile } from "./exporters";
+import type {
+    ClickAction,
+    SubtitleDoc,
+    SummaryResult,
+    TaskState,
+} from "../types";
 import {
     el,
     renderLoading,
     renderPhaseBlock,
-    renderTaskDisabled,
     renderTaskError,
-    renderTaskIdle,
     type Phase,
 } from "./common";
 
@@ -18,7 +20,9 @@ export interface SummaryViewProps {
     aiConfigured: boolean;
     doc: SubtitleDoc | null;
     summary: SummaryResult | null;
+    clickAction: ClickAction;
     onSeek: (time: number) => void;
+    onCopy: (text: string) => void;
 }
 
 export function renderSummaryView(
@@ -36,41 +40,61 @@ export function renderSummaryView(
         } else if (props.task.status === "error") {
             renderTaskError(root, props.task.error ?? "AI 总结生成失败");
         } else if (props.task.status === "disabled") {
-            renderTaskDisabled(root, "已在「设置」中关闭「生成视频总结」");
+            root.appendChild(
+                el(
+                    "div",
+                    "bia-placeholder",
+                    "已关闭「自动总结」\n点击右下角 ⟳ 按钮手动生成",
+                ),
+            );
+        } else if (props.aiConfigured) {
+            root.appendChild(
+                el(
+                    "div",
+                    "bia-placeholder",
+                    "自动总结已关闭\n点击右下角 ⟳ 按钮生成 AI 总结",
+                ),
+            );
         } else {
-            renderTaskIdle(root, props.aiConfigured, "生成 AI 总结");
+            root.appendChild(
+                el(
+                    "div",
+                    "bia-placeholder",
+                    "未配置 AI 接口\n\n点击工具栏扩展图标 → 「完整设置」",
+                ),
+            );
         }
         return;
     }
 
     const { summary } = props;
-    if (props.doc && (summary.overview || summary.sections.length > 0)) {
-        const exportRow = el("div", "bia-export-row");
-        const exportButton = el(
-            "button",
-            "bia-export-btn",
-            "⤓ 导出 Markdown",
-        ) as HTMLButtonElement;
-        exportButton.type = "button";
-        exportButton.addEventListener("click", () => {
-            if (props.doc) exportSummaryFile(props.doc, summary);
-        });
-        exportRow.appendChild(exportButton);
-        root.appendChild(exportRow);
-    }
+    // 点击文本: 跳转 或 复制该章节内容 (时间徽章始终跳转)
+    const sectionClick = (time: number, text: string) => {
+        if (props.clickAction === "copy" && text) props.onCopy(text);
+        else props.onSeek(time);
+    };
+
     if (summary.overview) {
         root.appendChild(el("div", "bia-overview", summary.overview));
     }
     for (const section of summary.sections) {
         const card = el("div", "bia-section");
         const head = el("div", "bia-section-head");
-        head.appendChild(el("span", "bia-time-badge", formatTime(section.start)));
+        const badge = el("span", "bia-time-badge", formatTime(section.start));
+        badge.title = "跳转到此时间";
+        badge.addEventListener("click", (event) => {
+            event.stopPropagation();
+            props.onSeek(section.start);
+        });
+        head.appendChild(badge);
         head.appendChild(el("span", "bia-section-title", section.title));
         card.appendChild(head);
         if (section.content) {
             card.appendChild(el("div", "bia-section-content", section.content));
         }
-        card.addEventListener("click", () => props.onSeek(section.start));
+        card.addEventListener("click", () =>
+            sectionClick(section.start, section.content || section.title),
+        );
         root.appendChild(card);
     }
     if (props.task.status === "loading") {

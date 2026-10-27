@@ -43,17 +43,6 @@ export interface SummaryResult {
     sections: SummarySection[];
 }
 
-export interface MindmapNode {
-    title: string;
-    start?: number;
-    children?: MindmapNode[];
-}
-
-export interface MindmapResult {
-    title: string;
-    children: MindmapNode[];
-}
-
 export interface AdSegment {
     from: number;
     to: number;
@@ -70,34 +59,55 @@ export interface AiSettings {
     model: string;
     /** 思考等级: "" 关闭思考 / low / medium / high (仅 OpenAI 兼容接口) */
     reasoningEffort: string;
-    /** 是否启用 AI 结果缓存 */
+    /** 是否启用缓存 (字幕 + 总结/广告 两层同时生效) */
     cacheEnabled: boolean;
     /** 缓存保留时长 (小时), 0 = 永久; 到期自动删除 */
     cacheTtlHours: number;
-    /**
-     * 单次汇总: 总结+导图+广告 一次请求完成 (Kimi 一个会话 / OpenAI 一次调用).
-     * 关闭则三任务分别请求.
-     */
-    combinedTasks: boolean;
 }
 
-/** AI 任务开关 (设置页) */
-export interface TaskToggles {
-    /** 生成视频总结 */
-    summary: boolean;
-    /** 生成思维导图 */
-    mindmap: boolean;
+/** 功能开关 (Popup 快捷开关 / Options 完整设置共用) */
+export interface FeatureSettings {
+    /** 进入视频后自动生成总结 */
+    autoSummary: boolean;
+    /** 识别广告片段 (自动跳过开启时强制视为开启) */
+    detectAds: boolean;
+    /** 播放到广告自动跳过; 关闭时改为弹提示框确认 */
+    autoSkipAds: boolean;
+    /** 点击文本行为: jump = 跳转播放位置 / copy = 复制文本 (时间徽章始终跳转) */
+    clickAction: ClickAction;
 }
 
-export type TabId = "summary" | "mindmap" | "timeline" | "settings";
+export type ClickAction = "jump" | "copy";
 
-export type TaskId = "summary" | "mindmap" | "ads";
+export type TabId = "summary" | "timeline";
+
+export type TaskId = "summary" | "ads";
 
 export type TaskStatus = "idle" | "loading" | "done" | "error" | "disabled";
 
 export interface TaskState {
     status: TaskStatus;
     error?: string;
+}
+
+/**
+ * 本次进入视频要执行的任务计划 (由功能开关推导, 纯函数可单测):
+ * - ads 生效 = detectAds || autoSkipAds (自动跳过依赖识别结果)
+ * - summary 与 ads 同时生效 → combined 单请求 (广告提示词最前, 流式优先返回广告)
+ */
+export interface TaskPlan {
+    summary: boolean;
+    ads: boolean;
+    autoSkip: boolean;
+    mode: "combined" | "summary" | "ads" | "none";
+}
+
+/** 视频 AI 结果缓存条目 (chrome.storage.local, 键 bia:ai-cache:{videoKey}) */
+export interface AiCacheEntry {
+    /** null = 尚未识别过广告; [] = 识别过且无广告 */
+    summary: SummaryResult | null;
+    ads: AdSegment[] | null;
+    savedAt: number;
 }
 
 export interface VideoMeta {

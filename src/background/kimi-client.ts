@@ -15,7 +15,30 @@ const REFRESH_TOKEN_KEY = "bia:kimi-refresh-token";
 const ACCESS_TOKEN_KEY = "bia:kimi-access-token";
 
 let accessToken: string | null = null;
-const pendingKimiChatIds = new Set<string>();
+
+// ---------------- SW 状态持久化 (storage.session) ----------------
+// MV3 SW 空闲 ~30s 被回收, 内存变量全部丢失; kimiTabId / 待删会话 id 必须落盘,
+// 否则表现为反复打开新 kimi 标签页 / 会话清理失效. 内存仅作镜像加速.
+
+const KIMI_TAB_KEY = "bia:kimi-tab-id";
+const PENDING_CHAT_IDS_KEY = "bia:kimi-pending-chat-ids";
+
+async function sessionGet<T>(key: string): Promise<T | null> {
+    try {
+        const result = await chrome.storage.session.get(key);
+        return (result?.[key] as T | undefined) ?? null;
+    } catch {
+        return null;
+    }
+}
+
+async function sessionSet(key: string, value: unknown): Promise<void> {
+    try {
+        await chrome.storage.session.set({ [key]: value });
+    } catch {
+        /* ignore */
+    }
+}
 
 export interface KimiAuthState {
     hasAccessToken: boolean;
@@ -72,15 +95,22 @@ async function isTabAlive(id: number): Promise<boolean> {
 
 /**
  * 获取常驻 kimi 标签页 (页面内流式回退专用).
- * 并发去重: 同时只创建一个; 用户关掉则重建.
+ * 并发去重: 同时只创建一个; 用户关掉则重建; tab id 持久化到 storage.session,
+ * SW 被回收重启后复用既有标签页而不是再开一个新的.
  */
 async function ensureKimiTab(): Promise<number> {
-    if (kimiTabId !== null && (await isTabAlive(kimiTabId))) return kimiTabId;
+    const persisted = await sessionGet<number>(KIMI_TAB_KEY);
+    if (persisted !== null && (await isTabAlive(persisted))) {
+        kimiTabId = persisted;
+        return persisted;
+    }
     kimiTabId = null;
+    await sessionSet(KIMI_TAB_KEY, null);
     if (kimiTabPending) return kimiTabPending;
     kimiTabPending = openKimiTab()
-        .then((id) => {
+        .then(async (id) => {
             kimiTabId = id;
+            await sessionSet(KIMI_TAB_KEY, id);
             return id;
         })
         .finally(() => {
@@ -592,16 +622,23 @@ async function streamChatInPage(
  * - 只有网络/鉴权类错误才回退页面内执行; 模型返回的业务错误直接抛出, 不重试
  * - 页面内回退失败时按 1s/3s 指数回退重试, 尽量避免再开新标签页
  */
-/** 记录本次创建的 kimi 会话 id, 供生成完成后清理. */
-export function trackKimiChatId(chatId: string): void {
-    if (chatId) pendingKimiChatIds.add(chatId);
+/** 记录本次创建的 kimi 会话 id, 供生成完成后清理 (写穿 storage.session). */
+export async function trackKimiChatId(chatId: string): Promise<void> {
+    if (!chatId) return;
+    const ids = await readPendingChatIds();
+    if (!ids.includes(chatId)) await sessionSet(PENDING_CHAT_IDS_KEY, [...ids, chatId]);
 }
 
 /** 取走并清空待删除的会话 id 列表. */
-export function drainKimiChatIds(): string[] {
-    const ids = [...pendingKimiChatIds];
-    pendingKimiChatIds.clear();
+export async function drainKimiChatIds(): Promise<string[]> {
+    const ids = await readPendingChatIds();
+    if (ids.length > 0) await sessionSet(PENDING_CHAT_IDS_KEY, []);
     return ids;
+}
+
+async function readPendingChatIds(): Promise<string[]> {
+    const value = await sessionGet<string[]>(PENDING_CHAT_IDS_KEY);
+    return Array.isArray(value) ? value.map(String) : [];
 }
 
 export async function streamKimiChat(
@@ -611,7 +648,7 @@ export async function streamKimiChat(
 ): Promise<string> {
     const token = await ensureAccessToken();
     const chatId = await createKimiChat(signal);
-    trackKimiChatId(chatId);
+    await trackKimiChatId(chatId);
     const body = {
         messages: toKimiMessages(messages),
         refs: [] as string[],

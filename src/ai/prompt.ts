@@ -97,28 +97,6 @@ export function mergeSummaryMessages(
     ];
 }
 
-export function mindmapMessages(
-    meta: VideoMeta,
-    input: string,
-): ChatMessage[] {
-    return [
-        { role: "system", content: SYSTEM_JSON },
-        {
-            role: "user",
-            content:
-                `视频标题:《${meta.title}》\n\n` +
-                "以下是视频的内容素材 (每行 [开始秒数] 文本):\n\n" +
-                `${input}\n\n` +
-                "请生成该视频的思维导图, 严格输出 JSON:\n" +
-                '{"title": "视频主题(简短)", "children": [{"title": "一级主题", "start": 开始秒数(数字), "children": [{"title": "二级主题", "start": 开始秒数}]}]}\n' +
-                "要求:\n" +
-                "1. 层级 2~3 层, 一级节点 3~8 个, 总节点数不超过 40;\n" +
-                "2. 尽量为每个节点标注 start (该主题首次出现在视频中的秒数, 必须取自素材行的时间戳, 不得虚构);\n" +
-                "3. 只输出 JSON。",
-        },
-    ];
-}
-
 export function adMessages(meta: VideoMeta, transcript: string): ChatMessage[] {
     return [
         {

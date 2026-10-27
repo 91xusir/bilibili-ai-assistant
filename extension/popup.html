@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>Bilibili AI 视频助手</title>
+  <link rel="stylesheet" href="pages.css">
+  <style>
+    body { width: 300px; padding: 12px 14px 10px; }
+    header {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 8px;
+    }
+    footer { margin-top: 12px; display: flex; justify-content: flex-end; }
+    #open-options {
+      border: none; background: transparent;
+      color: var(--bia-accent); font-size: 12px;
+      cursor: pointer; font-family: inherit; padding: 4px 2px;
+    }
+    #open-options:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Bilibili AI 视频助手</h1>
+  </header>
+  <main id="toggles"></main>
+  <footer>
+    <button id="open-options" type="button">完整设置 →</button>
+  </footer>
+  <script src="popup.js" defer></script>
+</body>
+</html>

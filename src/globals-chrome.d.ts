@@ -19,6 +19,9 @@ declare namespace chrome {
 
         function sendMessage(message: unknown): Promise<unknown>;
 
+        /** 打开选项页 (manifest options_ui) */
+        function openOptionsPage(): Promise<void>;
+
         const onConnect: {
             addListener(callback: (port: Port) => void): void;
         };
@@ -40,6 +43,11 @@ declare namespace chrome {
     }
 
     namespace storage {
+        interface StorageChange {
+            oldValue?: unknown;
+            newValue?: unknown;
+        }
+
         namespace local {
             function get(
                 keys: string | string[] | null,
@@ -47,6 +55,30 @@ declare namespace chrome {
             function set(items: Record<string, unknown>): Promise<void>;
             function remove(key: string | string[]): Promise<void>;
         }
+
+        /** SW 回收后仍保留的会话级存储 (浏览器关闭才清空) */
+        namespace session {
+            function get(
+                keys: string | string[] | null,
+            ): Promise<Record<string, unknown>>;
+            function set(items: Record<string, unknown>): Promise<void>;
+            function remove(key: string | string[]): Promise<void>;
+        }
+
+        const onChanged: {
+            addListener(
+                callback: (
+                    changes: Record<string, StorageChange>,
+                    areaName: string,
+                ) => void,
+            ): void;
+            removeListener(
+                callback: (
+                    changes: Record<string, StorageChange>,
+                    areaName: string,
+                ) => void,
+            ): void;
+        };
     }
 
     namespace action {

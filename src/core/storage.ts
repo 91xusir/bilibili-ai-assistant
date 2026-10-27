@@ -36,6 +36,28 @@ export function storageDelete(key: string): void {
     void chrome.storage.local.remove(key).catch(() => {});
 }
 
+/** 水合快照中的全部键 (供遍历清理, 依赖先 storageHydrate). */
+export function storageKeys(): string[] {
+    return Array.from(storageCache.keys());
+}
+
+/**
+ * chrome.storage.onChanged → 同步内存水合缓存 (弹窗/选项页修改设置后,
+ * 内容脚本无需重载即可读到新值). 返回解绑函数.
+ */
+export function watchStorageChanges(): () => void {
+    const listener = (
+        changes: Record<string, chrome.storage.StorageChange>,
+    ): void => {
+        for (const [key, change] of Object.entries(changes)) {
+            if (change.newValue === undefined) storageCache.delete(key);
+            else storageCache.set(key, change.newValue);
+        }
+    };
+    chrome.storage.onChanged.addListener(listener);
+    return () => chrome.storage.onChanged.removeListener(listener);
+}
+
 export function injectStyle(css: string): void {
     const style = document.createElement("style");
     style.textContent = css;

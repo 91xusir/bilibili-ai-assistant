@@ -1,36 +1,44 @@
 import { abortAllAiRequests } from "./api/ai";
 import { getSubtitleDoc, getVideoId, videoKey } from "./api/bilibili";
 import { detectAds } from "./ai/adDetect";
-import { generateCombined, type CombinedScope } from "./ai/combined";
-import { generateMindmap } from "./ai/mindmap";
-import {
-    buildTranscript,
-    chunkTranscript,
-    sectionsToTranscript,
-} from "./ai/prompt";
+import { findAdHit } from "./ai/adHit";
+import { generateCombined } from "./ai/combined";
+import { buildTranscript } from "./ai/prompt";
 import { generateSummary } from "./ai/summary";
 import {
     aiCacheKey,
-    getAdSkipEnabled,
+    cleanupLegacyStorage,
     getAiSettings,
-    getTaskToggles,
+    getFeatureSettings,
     isAiConfigured,
     isCacheExpired,
-    isCombinedTasksEnabled,
-    setAdSkipEnabled,
+    resolveTaskPlan,
+    saveFeatureSettings,
 } from "./config/settings";
+import {
+    cacheDeleteDoc,
+    cacheGetDoc,
+    cachePutDoc,
+} from "./core/cache-port";
 import { waitForElement } from "./core/dom";
-import { storageDelete, storageGet, storageSet, storageHydrate } from "./core/storage";
+import {
+    storageDelete,
+    storageGet,
+    storageHydrate,
+    storageSet,
+    watchStorageChanges,
+} from "./core/storage";
 import { onRouteChange } from "./core/route";
 import { VideoBinder } from "./core/video";
 import { formatTime } from "./subtitle";
 import type {
     AdSegment,
-    MindmapResult,
+    AiCacheEntry,
     SubtitleDoc,
     SummaryResult,
 } from "./types";
 import { Panel } from "./ui/panel";
+import { exportSummaryFile } from "./ui/exporters";
 import { injectStyles } from "./ui/style";
 import { showToast } from "./ui/toast";
 
@@ -46,15 +54,27 @@ function errorMessage(error: unknown): string {
 
 const binder = new VideoBinder((time) => {
     panel.setCurrentTime(time);
-    maybeSkipAd(time);
+    maybeHandleAd(time);
 });
 
 const panel = new Panel({
     onSeek: (time) => binder.seek(time),
-    onRefresh: () => void refreshAi(true),
+    onCopyText: (text) => void copyText(text),
+    onRefresh: () => void refreshAi(),
+    onDetectAds: () => void detectAdsNow(),
+    onExport: exportSummary,
     onAdSkipToggle: (enabled) => {
-        setAdSkipEnabled(enabled);
-        showToast(enabled ? "已开启自动跳过广告" : "已关闭自动跳过广告");
+        saveFeatureSettings({ autoSkipAds: enabled });
+        if (!enabled) panel.hideAdConfirm();
+        showToast(
+            enabled
+                ? "已开启自动跳过广告"
+                : "已关闭自动跳过广告, 播放到广告时将提示确认",
+        );
+    },
+    onAdBannerSkip: (target) => {
+        lastAdSkipTarget = target;
+        binder.seek(target);
     },
 });
 
@@ -63,25 +83,50 @@ let currentPageKey = "";
 let currentDoc: SubtitleDoc | null = null;
 let lastAdSkipTarget = -1;
 
-/** 播放进入 AI 识别出的广告片段时自动 seek 到片段结束. */
-function maybeSkipAd(time: number): void {
-    if (!getAdSkipEnabled() || !panel.hasAds()) return;
-    if (Math.abs(time - lastAdSkipTarget) < 0.5) return;
-    const hit = panel
-        .getAds()
-        .find(
-            (ad) =>
-                time >= ad.from - 0.3 &&
-                time < Math.max(ad.from + 0.5, ad.to - 0.5),
+async function copyText(text: string): Promise<void> {
+    try {
+        await navigator.clipboard.writeText(text);
+        showToast("已复制到剪贴板");
+    } catch {
+        showToast("复制失败", "error");
+    }
+}
+
+function exportSummary(): void {
+    const summary = panel.getSummary();
+    if (!summary || !currentDoc) {
+        showToast("总结尚未生成, 请先生成", "warn");
+        return;
+    }
+    exportSummaryFile(currentDoc, summary);
+    showToast("已导出视频总结 Markdown");
+}
+
+/**
+ * 播放到广告片段:
+ * - 自动跳过开启 → 直接 seek 到片段尾 + toast
+ * - 关闭 → 面板横幅提示 (3s 自动关闭); 离开广告段自动收起
+ */
+function maybeHandleAd(time: number): void {
+    const ads = panel.getAds();
+    if (ads.length === 0) return;
+    const hit = findAdHit(ads, time);
+    if (!hit) {
+        panel.hideAdConfirm();
+        return;
+    }
+    if (getFeatureSettings().autoSkipAds) {
+        if (Math.abs(time - lastAdSkipTarget) < 0.5) return;
+        lastAdSkipTarget = hit.to + 0.2;
+        panel.hideAdConfirm();
+        binder.seek(lastAdSkipTarget);
+        showToast(
+            `已自动跳过广告 ${formatTime(hit.from)} - ${formatTime(hit.to)}`,
+            "warn",
         );
-    if (!hit) return;
-    const target = hit.to + 0.2;
-    lastAdSkipTarget = target;
-    binder.seek(target);
-    showToast(
-        `已自动跳过广告 ${formatTime(hit.from)} - ${formatTime(hit.to)}`,
-        "warn",
-    );
+    } else {
+        panel.showAdConfirm(hit, (target) => binder.seek(target));
+    }
 }
 
 /** 面板插入到右侧栏顶部 (弹幕列表上方), 与原时间轴脚本位置一致. */
@@ -105,80 +150,95 @@ async function ensurePanelMounted(): Promise<void> {
     panel.mount(inner, before);
 }
 
-interface AiCache {
-    summary?: SummaryResult | null;
-    mindmap?: MindmapResult | null;
-    ads?: AdSegment[];
-    savedAt?: number;
+// ---------------- 缓存 (总结/广告 → chrome.storage.local, 键 = videoKey) ----------------
+
+function readCache(key: string): AiCacheEntry | null {
+    const settings = getAiSettings();
+    if (!settings.cacheEnabled) return null;
+    let entry = storageGet<AiCacheEntry | null>(key, null);
+    if (entry && isCacheExpired(entry.savedAt, settings.cacheTtlHours)) {
+        storageDelete(key);
+        entry = null;
+    }
+    return entry;
 }
+
+/** 写缓存: 只覆盖本次生成的部分, 未跑的任务保留旧值 (ads: null = 从未识别过). */
+function writeCache(
+    key: string,
+    patch: { summary?: SummaryResult; adsRan?: boolean; ads?: AdSegment[] },
+): void {
+    if (!getAiSettings().cacheEnabled) return;
+    const prev = storageGet<AiCacheEntry | null>(key, null);
+    const next: AiCacheEntry = {
+        summary: patch.summary ?? prev?.summary ?? null,
+        ads: patch.adsRan ? (patch.ads ?? []) : (prev?.ads ?? null),
+        savedAt: Date.now(),
+    };
+    storageSet(key, next);
+}
+
+// ---------------- AI 任务调度 ----------------
+
+/** auto = 自动 (按 plan + 缓存补缺); refresh = ⟳ 重生成; ads-only = 时间轴手动识别广告. */
+type RunMode = "auto" | "refresh" | "ads-only";
 
 async function runAiTasks(
     token: number,
     doc: SubtitleDoc,
-    force: boolean,
+    pageKey: string,
+    mode: RunMode,
 ): Promise<void> {
-    const settings = getAiSettings();
-    const cacheKey = aiCacheKey(doc.bvid, doc.cid, settings.model);
-    const cacheEnabled = settings.cacheEnabled !== false;
-    const toggles = getTaskToggles();
+    const plan = resolveTaskPlan(getFeatureSettings());
+    const cacheKey = aiCacheKey(pageKey);
 
-    if (cacheEnabled && !force) {
-        let cached = storageGet<AiCache | null>(cacheKey, null);
-        // 到期自动删除
-        if (
-            cached &&
-            isCacheExpired(cached.savedAt, settings.cacheTtlHours)
-        ) {
-            storageDelete(cacheKey);
-            cached = null;
+    let needSummary: boolean;
+    let needAds: boolean;
+    if (mode === "refresh") {
+        needSummary = true;
+        needAds = plan.ads;
+    } else if (mode === "ads-only") {
+        needSummary = false;
+        needAds = true;
+    } else {
+        const cached = readCache(cacheKey);
+        if (cached) {
+            panel.applyResult({
+                summary: plan.summary ? cached.summary : null,
+                ads: plan.ads ? cached.ads : null,
+            });
         }
-        if (
-            cached &&
-            (cached.summary ||
-                cached.mindmap ||
-                (Array.isArray(cached.ads) && cached.ads.length > 0))
-        ) {
-            panel.applyResult(
-                {
-                    summary: cached.summary ?? null,
-                    mindmap: cached.mindmap ?? null,
-                    ads: Array.isArray(cached.ads) ? cached.ads : [],
-                },
-                toggles,
-            );
-            panel.setAiConfigured(true);
-            return;
-        }
+        needSummary = plan.summary && !cached?.summary;
+        needAds = plan.ads && cached?.ads === null;
     }
 
+    if (!needSummary && !needAds) {
+        panel.setAiConfigured(isAiConfigured());
+        return;
+    }
     if (!isAiConfigured()) {
         panel.setAiConfigured(false);
-        panel.setTasksIdle(toggles);
         return;
     }
     panel.setAiConfigured(true);
-    panel.setTasksLoading(toggles);
+    panel.startGenerating({ summary: needSummary, ads: needAds });
 
     const meta = {
         title: doc.title,
         upName: doc.upName,
         duration: doc.duration,
     };
-
     let summary: SummaryResult | null = null;
-    let mindmap: MindmapResult | null = null;
-    let ads: AdSegment[] = [];
-    const scope = { summary: toggles.summary, mindmap: toggles.mindmap, ads: true };
+    let ads: AdSegment[] | null = null;
 
-    // 单次汇总: 一个请求产出广告+总结+导图 (Kimi = 一个会话; OpenAI = 一次调用)
-    // 广告检测提示词在最前 → 流式最先返回, 无需等总结完成即可优先判断广告
-    if (isCombinedTasksEnabled()) {
+    // 合并请求: 总结 + 广告一次完成, 广告提示词最前 → 流式最先返回广告
+    if (needSummary && needAds) {
         try {
             const combined = await generateCombined(
                 meta,
                 buildTranscript(doc.items),
                 doc.items,
-                scope,
+                { summary: true, ads: true },
                 (partial) => {
                     if (token !== runToken) return;
                     if (partial.sections || partial.overview) {
@@ -187,162 +247,90 @@ async function runAiTasks(
                             sections: partial.sections ?? [],
                         });
                     }
-                    if (partial.mindmapChildren) {
-                        panel.setMindmapPartial({
-                            title:
-                                partial.mindmapTitle ?? meta.title,
-                            children:
-                                partial.mindmapChildren as MindmapResult["children"],
-                        });
-                    }
-                    if (partial.ads) panel.setAds(partial.ads);
+                    if (partial.ads) panel.setAdsPartial(partial.ads);
                 },
             );
             if (token !== runToken) return;
-            if (scope.summary) {
-                summary = {
-                    overview: combined.overview,
-                    sections: combined.sections,
-                };
-                panel.setSummary(summary);
-            }
-            if (scope.mindmap) {
-                mindmap = {
-                    title: combined.mindmapTitle ?? meta.title,
-                    children:
-                        combined.mindmapChildren as MindmapResult["children"],
-                };
-                panel.setMindmap(mindmap);
-            }
+            summary = {
+                overview: combined.overview,
+                sections: combined.sections,
+            };
             ads = combined.ads;
+            panel.setSummary(summary);
             panel.setAds(ads);
         } catch (error) {
             if (token !== runToken) return;
-            // 汇总失败 → 降级为分任务重试 (广告已在前面独立请求, 不重复)
-            log("单次汇总失败, 降级为分任务重试:", errorMessage(error));
-            const degraded = await runSeparateTasks(
-                token,
-                doc,
-                meta,
-                toggles,
-                { ...scope, ads: false },
-            );
-            if (token !== runToken) return;
-            summary = degraded.summary;
-            mindmap = degraded.mindmap;
+            log("合并请求失败, 降级为分任务:", errorMessage(error));
+            summary = null;
+            ads = null;
         }
-    } else {
-        const degraded = await runSeparateTasks(
-            token,
-            doc,
-            meta,
-            toggles,
-            { ...scope, ads: false },
-        );
-        if (token !== runToken) return;
-        summary = degraded.summary;
-        mindmap = degraded.mindmap;
+    }
+
+    // 分任务路径 (单任务模式或合并失败降级): 广告在前, 优先出结果
+    if (ads === null && needAds && token === runToken) {
+        try {
+            ads = await detectAds(doc.items, meta);
+            if (token !== runToken) return;
+            panel.setAds(ads);
+        } catch (error) {
+            if (token !== runToken) return;
+            panel.setTaskError("ads", errorMessage(error));
+        }
+    }
+    if (summary === null && needSummary && token === runToken) {
+        try {
+            summary = await generateSummary(doc.items, meta, (partial) => {
+                if (token !== runToken) return;
+                panel.setSummaryPartial(partial);
+            });
+            if (token !== runToken) return;
+            panel.setSummary(summary);
+        } catch (error) {
+            if (token !== runToken) return;
+            panel.setTaskError("summary", errorMessage(error));
+        }
     }
 
     if (token !== runToken) return;
-
-    if (cacheEnabled) {
-        if (
-            (toggles.summary && summary) ||
-            (toggles.mindmap && mindmap) ||
-            ads.length > 0
-        ) {
-            storageSet(cacheKey, {
-                summary: toggles.summary ? summary : null,
-                mindmap: toggles.mindmap ? mindmap : null,
-                ads,
-                savedAt: Date.now(),
-            });
-        }
-    }
+    writeCache(cacheKey, {
+        summary: summary ?? undefined,
+        adsRan: ads !== null,
+        ads: ads ?? undefined,
+    });
 }
 
-/** 分任务执行 (旧路径 / 汇总失败降级): 三任务按原顺序, 出错仅影响单任务. */
-async function runSeparateTasks(
-    token: number,
-    doc: SubtitleDoc,
-    meta: { title: string; upName: string; duration: number },
-    toggles: { summary: boolean; mindmap: boolean },
-    scope: CombinedScope,
-): Promise<{
-    summary: SummaryResult | null;
-    mindmap: MindmapResult | null;
-    ads: AdSegment[];
-}> {
-    let summary: SummaryResult | null = null;
-    let mindmap: MindmapResult | null = null;
-    let ads: AdSegment[] = [];
-
-    const isStale = () => token !== runToken;
-
-    const adsTask = detectAds(doc.items, meta)
-        .then((result) => {
-            ads = result;
-            if (!isStale()) panel.setAds(result);
-        })
-        .catch((error) => {
-            if (!isStale()) panel.setTaskError("ads", errorMessage(error));
-        });
-
-    if (toggles.summary && !isStale()) {
-        try {
-            summary = await generateSummary(doc.items, meta, (partial) => {
-                if (!isStale()) panel.setSummaryPartial(partial);
-            });
-            if (!isStale()) panel.setSummary(summary);
-        } catch (error) {
-            if (!isStale()) panel.setTaskError("summary", errorMessage(error));
-        }
-    }
-
-    if (toggles.mindmap && !isStale()) {
-        try {
-            const needsChunk =
-                toggles.summary && chunkTranscript(doc.items).length > 1;
-            const condensed =
-                needsChunk && summary
-                    ? sectionsToTranscript(summary.sections)
-                    : null;
-            mindmap = await generateMindmap(
-                doc.items,
-                meta,
-                condensed,
-                (partial) => {
-                    if (!isStale()) panel.setMindmapPartial(partial);
-                },
-            );
-            if (!isStale()) panel.setMindmap(mindmap);
-        } catch (error) {
-            if (!isStale()) panel.setTaskError("mindmap", errorMessage(error));
-        }
-    }
-
-    await adsTask;
-    return { summary, mindmap, ads };
-}
-
-async function refreshAi(force: boolean): Promise<void> {
+/** ⟳ 重新生成: 总结必跑 (手动覆盖 autoSummary), 广告按 plan 附带. */
+async function refreshAi(): Promise<void> {
     const doc = currentDoc;
     if (!doc || !doc.track) {
         showToast("字幕尚未加载, 无法生成", "warn");
         return;
     }
     if (!isAiConfigured()) {
-        panel.openSettings();
-        showToast("请先配置 AI 接口", "warn");
+        showToast("请先在选项页配置 AI 接口", "warn");
+        void chrome.runtime.openOptionsPage();
         return;
     }
     abortAllAiRequests();
     const token = ++runToken;
-    if (force) {
-        storageDelete(aiCacheKey(doc.bvid, doc.cid, getAiSettings().model));
+    await runAiTasks(token, doc, currentPageKey, "refresh");
+}
+
+/** 时间轴页「识别广告」: 仅跑广告识别. */
+async function detectAdsNow(): Promise<void> {
+    const doc = currentDoc;
+    if (!doc || !doc.track) {
+        showToast("字幕尚未加载, 无法识别", "warn");
+        return;
     }
-    await runAiTasks(token, doc, force);
+    if (!isAiConfigured()) {
+        showToast("请先在选项页配置 AI 接口", "warn");
+        void chrome.runtime.openOptionsPage();
+        return;
+    }
+    abortAllAiRequests();
+    const token = ++runToken;
+    await runAiTasks(token, doc, currentPageKey, "ads-only");
 }
 
 async function handlePage(): Promise<void> {
@@ -375,7 +363,25 @@ async function handlePage(): Promise<void> {
     }
     if (token !== runToken) return;
 
+    const plan = resolveTaskPlan(getFeatureSettings());
+    panel.setTasksInitial({ summary: plan.summary, ads: plan.ads });
     panel.setSubtitleLoading();
+
+    // 字幕缓存 (SW 侧扩展源 IndexedDB, 与总结缓存同键同 TTL)
+    const settings = getAiSettings();
+    if (settings.cacheEnabled) {
+        const hit = await cacheGetDoc(key);
+        if (hit && isCacheExpired(hit.savedAt, settings.cacheTtlHours)) {
+            void cacheDeleteDoc(key);
+        } else if (hit) {
+            if (token !== runToken) return;
+            currentDoc = hit.doc;
+            panel.setDoc(hit.doc);
+            void runAiTasks(token, hit.doc, key, "auto");
+            return;
+        }
+    }
+
     let doc: SubtitleDoc;
     try {
         doc = await getSubtitleDoc(videoId);
@@ -393,18 +399,21 @@ async function handlePage(): Promise<void> {
         );
         return;
     }
+    if (settings.cacheEnabled) void cachePutDoc(key, doc);
     panel.setDoc(doc);
-    await runAiTasks(token, doc, false);
+    await runAiTasks(token, doc, key, "auto");
 }
 
 export async function main(): Promise<void> {
     // 水合 chrome.storage, 保证设置同步可读
     await storageHydrate();
+    cleanupLegacyStorage();
     injectStyles();
 
-    // 工具栏图标点击 → 打开「设置」标签页
-    chrome.runtime.onMessage.addListener((msg: { kind?: string }) => {
-        if (msg?.kind === "bia-open-settings") panel.openSettings();
+    // 弹窗/选项页修改设置后, 内容脚本实时同步 (内存缓存 + 面板状态)
+    watchStorageChanges();
+    chrome.storage.onChanged.addListener((_changes, area) => {
+        if (area === "local") panel.syncSettings();
     });
 
     binder.start();

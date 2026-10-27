@@ -336,7 +336,7 @@ export function extractJson(text: string): unknown {
         /* 继续尝试其他方式 */
     }
     const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
-    if (fenced) {
+    if (fenced?.[1]) {
         try {
             return JSON.parse(fenced[1].trim());
         } catch {
