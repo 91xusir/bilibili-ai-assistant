@@ -4,12 +4,12 @@
 
 ```bash
 bun install
-bun run typecheck
+bun run lint        # typecheck + unused locals/params (dead-code gate)
 bun test
 bun run build
 ```
 
-After changes, run `typecheck`, `test`, and `build`.
+After changes, run `lint`, `test`, and `build`.
 
 For browser validation, use Chrome DevTools MCP:
 1. Reload the extension.
@@ -178,10 +178,12 @@ During generation, disable relevant controls and show loading state. Restore con
 ## Testing
 
 ```bash
-bun run typecheck
+bun run lint
 bun test
 bun run build
 ```
+
+`lint` runs `tsc --noEmit --noUnusedLocals --noUnusedParameters` — it fails on any unused variable, parameter, or import. Treat it as the dead-code gate.
 
 - Unit tests cover pure logic only.
 - Chrome API mocks are permitted for unit tests.
