@@ -209,7 +209,7 @@ async function runAiTasks(
             });
         }
         needSummary = plan.summary && !cached?.summary;
-        needAds = plan.ads && cached?.ads === null;
+        needAds = plan.ads && cached?.ads == null;
     }
 
     if (!needSummary && !needAds) {

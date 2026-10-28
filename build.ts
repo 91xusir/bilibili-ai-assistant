@@ -1,5 +1,8 @@
 import { fileURLToPath } from "node:url";
 
+const isDebug = process.argv.includes("--debug");
+
+
 const pkg = await Bun.file(new URL("./package.json", import.meta.url)).json();
 
 // MV3 扩展: content.js + service-worker.js + popup.js + options.js + 静态文件
@@ -15,7 +18,7 @@ const ext = await Bun.build({
     outdir: fileURLToPath(new URL("./dist", import.meta.url)),
     target: "browser",
     format: "iife",
-    minify: true,
+    minify: !isDebug,
     naming: { entry: "[name].[ext]" },
 });
 if (!ext.success) {
