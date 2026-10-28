@@ -7,10 +7,6 @@
 
 ----
 
-> **AI agents:** If you are an AI agent planning to do secondary development, read [DEVELOPMENT.md](./DEVELOPMENT.md) first before making any changes.
-
-
-
 ## 用法
 
 打开视频页后右侧栏顶部会出现面板，两个标签页：
