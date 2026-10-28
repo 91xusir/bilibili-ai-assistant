@@ -20,8 +20,6 @@ export interface SubtitleItem {
 
 export interface SubtitleDoc {
     bvid: string;
-    avid: number;
-    cid: number;
     part: number;
     title: string;
     upName: string;

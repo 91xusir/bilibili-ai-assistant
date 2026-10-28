@@ -121,13 +121,3 @@ export function adMessages(meta: VideoMeta, transcript: string): ChatMessage[] {
         },
     ];
 }
-
-/** 分段总结 → 供思维导图使用的压缩素材. */
-export function sectionsToTranscript(sections: SummarySection[]): string {
-    return sections
-        .map(
-            (section) =>
-                `[${Math.round(section.start)}s] ${section.title}\n${section.content}`,
-        )
-        .join("\n");
-}

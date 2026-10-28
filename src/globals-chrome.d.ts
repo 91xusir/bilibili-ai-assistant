@@ -84,14 +84,6 @@ declare namespace chrome {
         };
     }
 
-    namespace action {
-        const onClicked: {
-            addListener(
-                callback: (tab: { id?: number | undefined }) => void,
-            ): void;
-        };
-    }
-
     namespace tabs {
         interface Tab {
             id?: number | undefined;
@@ -105,10 +97,6 @@ declare namespace chrome {
         function remove(tabId: number): Promise<void>;
         /** 按 URL 匹配查找标签页 (复用用户已打开的 kimi.com 页面) */
         function query(info: { url: string }): Promise<Tab[]>;
-        function sendMessage(
-            tabId: number,
-            message: unknown,
-        ): Promise<unknown>;
         const onUpdated: {
             addListener(
                 callback: (

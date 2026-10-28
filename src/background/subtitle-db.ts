@@ -45,14 +45,6 @@ function openDb(): Promise<IDBDatabase> {
     return dbPromise;
 }
 
-function requestToPromise<T>(request: IDBRequest<T>): Promise<T> {
-    return new Promise((resolve, reject) => {
-        request.onsuccess = () => resolve(request.result);
-        request.onerror = () =>
-            reject(request.error ?? new Error("IndexedDB 操作失败"));
-    });
-}
-
 async function withStore<T>(
     mode: IDBTransactionMode,
     run: (store: IDBObjectStore) => IDBRequest<T> | null,

@@ -54,8 +54,7 @@ export function getKimiAuthState(): KimiAuthState {
 
 // ---------------- 标签页管理 ----------------
 
-/** 常驻标签页: 仅页面内流式回退时复用 (最多一个). */
-let kimiTabId: number | null = null;
+/** 常驻标签页: 仅页面内流式回退时复用 (最多一个, id 持久化到 storage.session). */
 let kimiTabPending: Promise<number> | null = null;
 
 async function openKimiTab(): Promise<number> {
@@ -113,22 +112,16 @@ async function findExistingKimiTab(): Promise<number | null> {
  */
 async function ensureKimiTab(): Promise<number> {
     const persisted = await sessionGet<number>(KIMI_TAB_KEY);
-    if (persisted !== null && (await isTabAlive(persisted))) {
-        kimiTabId = persisted;
-        return persisted;
-    }
+    if (persisted !== null && (await isTabAlive(persisted))) return persisted;
     const existing = await findExistingKimiTab();
     if (existing !== null) {
-        kimiTabId = existing;
         await sessionSet(KIMI_TAB_KEY, existing);
         return existing;
     }
-    kimiTabId = null;
     await sessionSet(KIMI_TAB_KEY, null);
     if (kimiTabPending) return kimiTabPending;
     kimiTabPending = openKimiTab()
         .then(async (id) => {
-            kimiTabId = id;
             await sessionSet(KIMI_TAB_KEY, id);
             return id;
         })
@@ -193,7 +186,7 @@ async function readLocalStorageOnce<T>(
 
 // ---------------- Token ----------------
 
-export async function loadRefreshTokenFromPage(): Promise<string | null> {
+async function loadRefreshTokenFromPage(): Promise<string | null> {
     try {
         const token = await readLocalStorageOnce(() =>
             localStorage.getItem("refresh_token"),

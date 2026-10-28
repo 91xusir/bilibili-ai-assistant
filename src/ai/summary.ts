@@ -1,4 +1,5 @@
 import { chatJson, chatJsonStream } from "../api/ai";
+import { normalizeSections } from "./normalize";
 import {
     extractArrayItemsSoFar,
     extractStringField,
@@ -17,22 +18,6 @@ import {
     partialSummaryMessages,
     summaryMessages,
 } from "./prompt";
-
-function normalizeSections(raw: unknown): SummarySection[] {
-    const list = Array.isArray(raw)
-        ? raw
-        : (raw as Record<string, unknown>)?.sections;
-    if (!Array.isArray(list)) return [];
-    return list
-        .map((item: Record<string, unknown>) => ({
-            start: Number(item?.start) || 0,
-            end: Number(item?.end) || 0,
-            title: String(item?.title ?? "").trim() || "未命名章节",
-            content: String(item?.content ?? "").trim(),
-        }))
-        .filter((section) => section.content || section.title !== "未命名章节")
-        .sort((a, b) => a.start - b.start);
-}
 
 /**
  * 生成视频总结.

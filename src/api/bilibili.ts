@@ -159,8 +159,6 @@ export async function getSubtitleDoc(videoId: VideoId): Promise<SubtitleDoc> {
 
     return {
         bvid: view.bvid,
-        avid: view.aid,
-        cid: page.cid,
         part: page.page,
         title: view.title,
         upName: view.owner?.name ?? "",

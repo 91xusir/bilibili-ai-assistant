@@ -236,23 +236,6 @@ const STYLE = `
   font-weight: 600;
 }
 
-/* ---- 设置标签页 ---- */
-.bia-modal-title { font-weight: 600; margin-bottom: 4px; }
-.bia-modal-desc { color: var(--bia-text-2); font-size: 11.5px; line-height: 1.6; margin-bottom: 10px; }
-.bia-field { display: block; margin-bottom: 10px; font-size: 12px; color: var(--bia-text-2); }
-.bia-input {
-  display: block; width: 100%; margin-top: 4px;
-  background: var(--bia-bg);
-  border: 1px solid var(--bia-border);
-  color: var(--bia-text);
-  border-radius: 4px;
-  padding: 6px 8px;
-  font-size: 12.5px;
-  outline: none;
-  font-family: inherit;
-}
-.bia-input:focus { border-color: var(--bia-accent); }
-.bia-modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
 .bia-btn {
   padding: 5px 14px;
   border-radius: 4px;
@@ -264,8 +247,6 @@ const STYLE = `
   font-family: inherit;
 }
 .bia-btn:hover { filter: brightness(1.15); }
-.bia-btn-primary { background: var(--bia-accent); border-color: var(--bia-accent); color: #102020; font-weight: 600; }
-.bia-model-btn { flex-shrink: 0; white-space: nowrap; padding: 5px 10px; }
 .bia-statusbar {
   flex-shrink: 0;
   display: none;
@@ -352,112 +333,7 @@ const STYLE = `
   animation: bia-pulse 1.2s ease-in-out infinite;
 }
 @keyframes bia-pulse { 50% { opacity: 0.35; } }
-.bia-test-row { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 10px; }
-.bia-test-result { font-size: 11.5px; line-height: 1.5; word-break: break-all; min-width: 0; }
-.bia-test-ok { color: #5dd39e; }
 .bia-test-fail { color: #ff8080; }
-
-/* ---- 服务商切换 ---- */
-.bia-provider-row { display: flex; gap: 6px; margin-bottom: 10px; }
-.bia-provider-btn {
-  flex: 1;
-  padding: 6px 8px;
-  border: 1px solid var(--bia-border);
-  border-radius: 4px;
-  background: var(--bia-bg-3);
-  color: var(--bia-text-2);
-  cursor: pointer;
-  font-size: 12px;
-  font-family: inherit;
-}
-.bia-provider-btn.bia-active {
-  background: var(--bia-accent-dim);
-  border-color: var(--bia-accent);
-  color: var(--bia-accent);
-  font-weight: 600;
-}
-.bia-kimi-status { font-size: 12px; margin-bottom: 8px; color: var(--bia-text); }
-.bia-kimi-button-row { display: flex; gap: 8px; margin-bottom: 10px; }
-
-/* ---- 开关 ---- */
-.bia-switch-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 8px 0;
-  border-bottom: 1px solid var(--bia-border);
-  margin-bottom: 4px;
-}
-.bia-switch-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.bia-switch-label { color: var(--bia-text); font-size: 12.5px; }
-.bia-switch-desc { color: var(--bia-text-2); font-size: 11px; }
-.bia-switch {
-  position: relative;
-  width: 34px; height: 18px;
-  flex-shrink: 0;
-  border: none;
-  border-radius: 9px;
-  background: var(--bia-bg-3);
-  cursor: pointer;
-  padding: 0;
-  transition: background 0.2s;
-}
-.bia-switch.bia-on { background: var(--bia-accent); }
-.bia-switch-knob {
-  position: absolute;
-  top: 2px; left: 2px;
-  width: 14px; height: 14px;
-  border-radius: 50%;
-  background: #c8c8c8;
-  transition: transform 0.2s, background 0.2s;
-}
-.bia-switch.bia-on .bia-switch-knob { transform: translateX(16px); background: #102020; }
-.bia-settings-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
-.bia-model-row { display: flex; gap: 6px; margin-top: 4px; align-items: flex-start; }
-.bia-model-wrap { position: relative; flex: 1; min-width: 0; }
-.bia-model-wrap .bia-input { margin-top: 0; width: 100%; padding-right: 22px; }
-.bia-model-wrap.has-value .bia-model-clear { display: block; }
-.bia-model-clear {
-  position: absolute;
-  right: 4px; top: 50%;
-  transform: translateY(-50%);
-  width: 16px; height: 16px;
-  display: none;
-  align-items: center; justify-content: center;
-  border: none; background: var(--bia-bg-3);
-  color: var(--bia-text-2);
-  border-radius: 50%;
-  font-size: 10px;
-  line-height: 1;
-  cursor: pointer;
-  padding: 0;
-}
-.bia-model-clear:hover { background: var(--bia-danger); color: #fff; }
-.bia-model-dropdown {
-  position: absolute;
-  top: 100%; left: 0; right: 0;
-  z-index: 20;
-  max-height: 170px;
-  overflow-y: auto;
-  display: none;
-  margin-top: 2px;
-  background: var(--bia-bg);
-  border: 1px solid var(--bia-border);
-  border-radius: 4px;
-  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.35);
-}
-.bia-model-dropdown.bia-open { display: block; }
-.bia-model-item {
-  padding: 6px 10px;
-  font-size: 12px;
-  cursor: pointer;
-  overflow-wrap: anywhere;
-}
-.bia-model-item:hover { background: var(--bia-bg-3); }
-.bia-model-item.bia-current { color: var(--bia-accent); }
-/* API Key 遮罩显示: text + webkit-text-security, 规避浏览器密码管理器 */
-.bia-secret { -webkit-text-security: disc; letter-spacing: 1px; }
 
 /* ---- Toast ---- */
 .bia-toast-wrap {

@@ -34,31 +34,7 @@ export function renderPhaseBlock(
     root.appendChild(el("div", "bia-placeholder", message));
 }
 
-export function renderTaskIdle(
-    root: HTMLElement,
-    aiConfigured: boolean,
-    actionText: string,
-): void {
-    if (aiConfigured) {
-        root.appendChild(
-            el("div", "bia-placeholder", `点击右下角 ⟳ 按钮${actionText}`),
-        );
-    } else {
-        root.appendChild(
-            el(
-                "div",
-                "bia-placeholder",
-                "未配置 AI 接口\n\n点击「设置」标签页\n填写 OpenAI 兼容接口地址与模型名",
-            ),
-        );
-    }
-}
-
 export function renderTaskError(root: HTMLElement, error: string): void {
     root.appendChild(el("div", "bia-error", error));
     root.appendChild(el("div", "bia-retry-hint", "点击右下角 ⟳ 按钮重试"));
-}
-
-export function renderTaskDisabled(root: HTMLElement, text: string): void {
-    root.appendChild(el("div", "bia-placeholder", text));
 }

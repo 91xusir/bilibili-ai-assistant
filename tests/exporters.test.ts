@@ -4,8 +4,6 @@ import type { SubtitleDoc, SummaryResult } from "../src/types";
 
 const doc: SubtitleDoc = {
     bvid: "BV1test",
-    avid: 1,
-    cid: 2,
     part: 1,
     title: "测试视频",
     upName: "UP",

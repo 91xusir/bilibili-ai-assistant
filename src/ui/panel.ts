@@ -9,7 +9,6 @@ import type {
 } from "../types";
 import { el, type Phase } from "./common";
 import { renderSummaryView } from "./summaryView";
-import { showToast } from "./toast";
 import { renderTimelineView, type TimelineHandle } from "./timelineView";
 
 const ICON_AD_BLOCK =
@@ -46,7 +45,6 @@ export class Panel {
     private tabButtons: Partial<Record<TabId, HTMLButtonElement>> = {};
     private fabStack: HTMLElement | null = null;
     private refreshFab: HTMLButtonElement | null = null;
-    private exportMenu: HTMLElement | null = null;
     private exportItem: HTMLButtonElement | null = null;
     private adBanner: HTMLElement | null = null;
     private adBannerText: HTMLElement | null = null;
@@ -485,7 +483,6 @@ export class Panel {
                 else menu.showPopover();
             });
         }
-        this.exportMenu = menu;
         this.exportItem = item;
         const wrap = el("div", "bia-export-wrap");
         wrap.append(exportFab, menu);
@@ -493,10 +490,7 @@ export class Panel {
     }
 
     /** 广告确认横幅: 同一广告段只提示一次; 10s 无操作自动关闭后同段不再打扰. */
-    showAdConfirm(
-        ad: AdSegment,
-        skip: (seekTarget: number) => void,
-    ): void {
+    showAdConfirm(ad: AdSegment): void {
         if (!this.adBanner || !this.adBannerText) return;
         if (this.adBannerFrom === ad.from) return; // 已在提示该片段
         if (this.dismissedAdFrom === ad.from) return; // 本段已被超时关闭, 离开段前不再弹出
@@ -512,12 +506,10 @@ export class Panel {
             this.adBanner?.classList.remove("bia-show");
         }, AD_BANNER_DURATION);
         this.pendingSkipTarget = ad.to + 0.2;
-        this.adSkipResolve = skip;
     }
 
     private pendingSkipTarget = -1;
     private dismissedAdFrom = -1;
-    private adSkipResolve: ((target: number) => void) | null = null;
 
     hideAdConfirm(): void {
         if (this.adBannerTimer !== null) {
@@ -567,7 +559,12 @@ export class Panel {
         if (this.statusTimer === null) {
             this.statusTimer = setInterval(() => this.updateLoadingBar(), 1000);
         }
-        const model = getAiSettings().model || "AI";
+        // kimi 网页版没有模型名; 只有 OpenAI 兼容接口才显示模型
+        const aiSettings = getAiSettings();
+        const model =
+            aiSettings.provider === "openai"
+                ? aiSettings.model || "自定义接口"
+                : "kimi";
         const elapsed = Math.max(
             0,
             Math.round((Date.now() - this.loadingSince) / 1000),

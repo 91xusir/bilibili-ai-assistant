@@ -125,7 +125,7 @@ function maybeHandleAd(time: number): void {
             "warn",
         );
     } else {
-        panel.showAdConfirm(hit, (target) => binder.seek(target));
+        panel.showAdConfirm(hit);
     }
 }
 

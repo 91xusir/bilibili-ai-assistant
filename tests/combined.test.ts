@@ -2,10 +2,8 @@ import { describe, expect, test } from "bun:test";
 import {
     combinedMessages,
     extractCombinedSoFar,
-    normalizeAds,
-    normalizeSections,
 } from "../src/ai/combined";
-import type { SubtitleItem } from "../src/types";
+import { normalizeAds, normalizeSections } from "../src/ai/normalize";
 
 describe("extractCombinedSoFar", () => {
     test("流式前段: ads 先于 sections 被提取", () => {
