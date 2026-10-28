@@ -1,9 +1,6 @@
 # Bilibili AI 视频助手
 
-<div align="center">
-  <img src="https://img.shields.io/badge/AI%20Code-100%25-orange" alt="AI Coding 100%">
-  <img src="https://img.shields.io/badge/Use-GLM--5.3_Flash-blueviolet" alt="Use GLM-5.3 Flash">
-</div>
+<div align="center"><img src="https://img.shields.io/badge/Contribution-cccccc" alt="Contribution"><img src="https://img.shields.io/badge/🤖%20Agent-100%25-94C9E7" alt="Agent"><img src="https://img.shields.io/badge/🧑‍💻%20Human-0%25-A86F4D" alt="Human"></div>
 
 ----
 
