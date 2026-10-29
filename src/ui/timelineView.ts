@@ -14,10 +14,8 @@ export interface TimelineViewProps {
     ads: AdSegment[];
     adsTask: TaskState;
     clickAction: ClickAction;
-    generating: boolean;
     onSeek: (time: number) => void;
     onCopy: (text: string) => void;
-    onDetectAds: () => void;
 }
 
 export interface TimelineHandle {
@@ -37,7 +35,6 @@ export function renderTimelineView(
         return null;
     }
 
-    // 工具栏: 识别广告手动触发 (自动识别被关闭时由此补跑)
     root.appendChild(buildToolbar(props));
 
     const items = props.doc.items;
@@ -47,9 +44,10 @@ export function renderTimelineView(
 
     for (const item of items) {
         const row = el("div", "bia-tl-row");
+        // 广告片段已过最短时长阈值 (main 入面板前统一过滤)
         const ad = ads.find(
-            (segment) =>//小于5秒的广告可能是误判
-                segment.to - segment.from > 5 && item.from >= segment.from - 0.01 && item.from < segment.to,
+            (segment) =>
+                item.from >= segment.from - 0.01 && item.from < segment.to,
         );
         if (ad) row.classList.add("bia-tl-ad-row");
 
@@ -96,18 +94,8 @@ export function renderTimelineView(
 }
 
 function buildToolbar(props: TimelineViewProps): HTMLElement {
+    // 状态行: 广告识别进度/结果 (识别由 ⟳ 触发, 随标签页分职)
     const bar = el("div", "bia-tl-toolbar");
-    const button = el(
-        "button",
-        "bia-btn bia-detect-btn",
-        props.adsTask.status === "loading" ? "识别中..." : "识别广告",
-    ) as HTMLButtonElement;
-    button.type = "button";
-    button.title = "单独识别本视频的广告片段";
-    button.disabled = props.generating;
-    button.addEventListener("click", () => props.onDetectAds());
-    bar.appendChild(button);
-
     let statusText = "";
     if (props.adsTask.status === "loading") statusText = "AI 正在识别广告...";
     else if (props.adsTask.status === "error") {

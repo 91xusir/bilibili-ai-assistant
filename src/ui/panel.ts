@@ -28,8 +28,8 @@ export interface PanelCallbacks {
     onRefresh: () => void;
     /** 时间轴页「识别广告」按钮: 仅跑广告识别 */
     onDetectAds: () => void;
-    /** 导出菜单项: 导出视频总结 Markdown */
-    onExport: () => void;
+    /** 导出菜单项: target = 当前标签页 (总结页导 Markdown, 时间轴页导 JSON) */
+    onExport: (target: "summary" | "timeline") => void;
     /** 头部 ⊘ 按钮: 切换自动跳过广告 */
     onAdSkipToggle: (enabled: boolean) => void;
     /** 广告横幅「跳过」按钮: seek 到片段结束 */
@@ -306,7 +306,20 @@ export class Panel {
         this.timelineHandle = null;
         this.timelineRendered = false;
 
-        const generating = this.generating;
+        // ⟳ 与导出随标签页分职: 总结页生成/导出总结, 时间轴页识别/导出广告
+        const onTimeline = this.activeTab === "timeline";
+        if (this.refreshFab) {
+            this.refreshFab.title = onTimeline ? "识别广告" : "重新生成总结";
+        }
+        if (this.exportItem) {
+            this.exportItem.textContent = onTimeline
+                ? "导出时间轴 (JSON)"
+                : "导出视频总结 (.md)";
+            this.exportItem.disabled = onTimeline
+                ? !this.doc
+                : !this.summary;
+        }
+
         if (this.activeTab === "summary") {
             renderSummaryView(this.viewRoots.summary!, {
                 phase: this.phase,
@@ -329,10 +342,8 @@ export class Panel {
                 ads: this.ads,
                 adsTask: this.tasks.ads,
                 clickAction: getClickAction(),
-                generating,
                 onSeek: this.callbacks.onSeek,
                 onCopy: this.callbacks.onCopyText,
-                onDetectAds: this.callbacks.onDetectAds,
             });
             this.timelineHandle = handle;
             this.timelineRendered = true;
@@ -443,7 +454,10 @@ export class Panel {
         refreshFab.type = "button";
         refreshFab.title = "重新生成总结";
         refreshFab.innerHTML = ICON_REFRESH;
-        refreshFab.addEventListener("click", () => this.callbacks.onRefresh());
+        refreshFab.addEventListener("click", () => {
+            if (this.activeTab === "timeline") this.callbacks.onDetectAds();
+            else this.callbacks.onRefresh();
+        });
         this.refreshFab = refreshFab;
         return refreshFab;
     }
@@ -470,7 +484,9 @@ export class Panel {
         item.disabled = true;
         item.addEventListener("click", () => {
             menu.hidePopover();
-            this.callbacks.onExport();
+            this.callbacks.onExport(
+                this.activeTab === "timeline" ? "timeline" : "summary",
+            );
         });
         focusWrap.appendChild(item);
         menu.appendChild(focusWrap);
@@ -553,8 +569,6 @@ export class Panel {
             this.refreshFab.disabled = anyLoading;
             this.refreshFab.classList.toggle("bia-spinning", anyLoading);
         }
-        // 导出菜单项: 无总结时置灰
-        if (this.exportItem) this.exportItem.disabled = !this.summary;
         if (!anyLoading) return;
         if (this.statusTimer === null) {
             this.statusTimer = setInterval(() => this.updateLoadingBar(), 1000);

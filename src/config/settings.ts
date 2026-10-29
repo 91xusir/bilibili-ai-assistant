@@ -25,6 +25,7 @@ const DEFAULT_FEATURE_SETTINGS: FeatureSettings = {
     autoSummary: true,
     detectAds: true,
     autoSkipAds: true,
+    adMinDuration: 5,
     clickAction: "jump",
 };
 

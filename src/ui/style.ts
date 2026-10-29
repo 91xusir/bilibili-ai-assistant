@@ -208,8 +208,6 @@ const STYLE = `
   gap: 8px;
   margin-bottom: 8px;
 }
-.bia-detect-btn { padding: 4px 12px; font-size: 12px; }
-.bia-detect-btn:disabled { opacity: 0.5; cursor: default; }
 .bia-tl-status { font-size: 11.5px; color: var(--bia-text-2); min-width: 0; }
 
 /* ---- 广告确认横幅 ---- */

@@ -10,7 +10,7 @@ import { storageHydrate } from "../core/storage";
 import { subtitleDeleteAll, subtitleList } from "../background/subtitle-db";
 import type { AiProvider, ClickAction } from "../types";
 import { el } from "../ui/common";
-import { buildSegmentRow, buildSwitchRow } from "../ui/widgets";
+import { buildNumberRow, buildSegmentRow, buildSwitchRow } from "../ui/widgets";
 
 /**
  * Options 选项页: 完整设置 (AI 任务 / 服务商 / 缓存 / 缓存管理).
@@ -33,10 +33,18 @@ function buildTaskToggles(): void {
     );
     container.appendChild(
         buildSwitchRow(
-            "识别广告",
-            "识别视频中的广告片段",
+            "自动识别广告",
+            "进入视频后自动识别广告片段",
             features.detectAds,
             (value) => saveFeatureSettings({ detectAds: value }),
+        ),
+    );
+    container.appendChild(
+        buildNumberRow(
+            "广告最短时长",
+            "短于该秒数的片段视为误判, 不当作广告",
+            features.adMinDuration,
+            (value) => saveFeatureSettings({ adMinDuration: value }),
         ),
     );
     container.appendChild(

@@ -67,3 +67,27 @@ export function buildSegmentRow<T extends string>(
     row.append(text, group);
     return row;
 }
+
+/** 数字输入行 (如 广告最短时长), change 时回调. */
+export function buildNumberRow(
+    label: string,
+    desc: string,
+    initial: number,
+    onChange: (value: number) => void,
+): HTMLElement {
+    const row = el("div", "bia-switch-row");
+    const text = el("div", "bia-switch-text");
+    text.appendChild(el("span", "bia-switch-label", label));
+    if (desc) text.appendChild(el("span", "bia-switch-desc", desc));
+    const input = el("input", "bia-number-input") as HTMLInputElement;
+    input.type = "number";
+    input.min = "0";
+    input.step = "1";
+    input.value = String(initial);
+    input.addEventListener("change", () => {
+        const value = Number(input.value);
+        onChange(Number.isFinite(value) && value > 0 ? Math.round(value) : 0);
+    });
+    row.append(text, input);
+    return row;
+}

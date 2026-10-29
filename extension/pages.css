@@ -90,6 +90,21 @@ h2 {
 }
 .bia-switch.bia-on .bia-switch-knob { transform: translateX(16px); background: #102020; }
 
+/* 数字输入行 */
+.bia-number-input {
+  width: 72px;
+  flex-shrink: 0;
+  padding: 4px 8px;
+  border: 1px solid var(--bia-border);
+  border-radius: 4px;
+  background: var(--bia-bg);
+  color: var(--bia-text);
+  font-size: 12px;
+  font-family: inherit;
+  text-align: right;
+}
+.bia-number-input:focus { border-color: var(--bia-accent); outline: none; }
+
 /* 分段选择 */
 .bia-segment { display: flex; gap: 4px; flex-shrink: 0; }
 .bia-segment-btn {

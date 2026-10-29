@@ -67,10 +67,12 @@ export interface AiSettings {
 export interface FeatureSettings {
     /** 进入视频后自动生成总结 */
     autoSummary: boolean;
-    /** 识别广告片段 (自动跳过开启时强制视为开启) */
+    /** 进入视频后自动识别广告片段 */
     detectAds: boolean;
     /** 播放到广告自动跳过; 关闭时改为弹提示框确认 */
     autoSkipAds: boolean;
+    /** 广告最短时长 (秒): 短于该值的片段视为误判, 不当作广告 */
+    adMinDuration: number;
     /** 点击文本行为: jump = 跳转播放位置 / copy = 复制文本 (时间徽章始终跳转) */
     clickAction: ClickAction;
 }

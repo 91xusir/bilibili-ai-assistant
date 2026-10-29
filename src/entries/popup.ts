@@ -6,7 +6,7 @@ import {
 } from "../config/settings";
 import { storageHydrate } from "../core/storage";
 import type { ClickAction } from "../types";
-import { buildSegmentRow, buildSwitchRow } from "../ui/widgets";
+import { buildNumberRow, buildSegmentRow, buildSwitchRow } from "../ui/widgets";
 
 /**
  * 工具栏 Popup: 仅功能开关 (即时保存).
@@ -30,10 +30,18 @@ async function init(): Promise<void> {
         );
         root.appendChild(
             buildSwitchRow(
-                "识别广告",
-                "识别视频中的广告片段",
+                "自动识别广告",
+                "进入视频后自动识别广告片段",
                 f.detectAds,
                 (value) => saveFeatureSettings({ detectAds: value }),
+            ),
+        );
+        root.appendChild(
+            buildNumberRow(
+                "广告最短时长",
+                "短于该秒数的片段视为误判, 不当作广告",
+                f.adMinDuration,
+                (value) => saveFeatureSettings({ adMinDuration: value }),
             ),
         );
         root.appendChild(

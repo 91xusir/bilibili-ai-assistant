@@ -46,6 +46,7 @@ describe("resolveTaskPlan", () => {
         autoSummary: true,
         detectAds: true,
         autoSkipAds: true,
+        adMinDuration: 5,
         clickAction: "jump",
     };
 

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { findAdHit } from "../src/ai/adHit";
+import { filterAdsByDuration, findAdHit } from "../src/ai/adHit";
 import type { AdSegment } from "../src/types";
 
 const ads: AdSegment[] = [
@@ -25,5 +25,24 @@ describe("findAdHit", () => {
         expect(findAdHit(ads, 5)).toBeNull();
         expect(findAdHit(ads, 50)).toBeNull();
         expect(findAdHit([], 10)).toBeNull();
+    });
+});
+
+describe("filterAdsByDuration", () => {
+    const ads: AdSegment[] = [
+        { from: 10, to: 12, reason: "太短" },
+        { from: 30, to: 45, reason: "够长" },
+    ];
+
+    test("过滤短于阈值的片段", () => {
+        expect(filterAdsByDuration(ads, 5)).toEqual([{ from: 30, to: 45, reason: "够长" }]);
+    });
+
+    test("恰好等于阈值保留", () => {
+        expect(filterAdsByDuration(ads, 2).length).toBe(2);
+    });
+
+    test("阈值 <=0 不过滤", () => {
+        expect(filterAdsByDuration(ads, 0).length).toBe(2);
     });
 });

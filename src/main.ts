@@ -1,7 +1,7 @@
 import { abortAllAiRequests } from "./api/ai";
 import { getSubtitleDoc, getVideoId, videoKey } from "./api/bilibili";
 import { detectAds } from "./ai/adDetect";
-import { findAdHit } from "./ai/adHit";
+import { filterAdsByDuration, findAdHit } from "./ai/adHit";
 import { generateCombined } from "./ai/combined";
 import { buildTranscript } from "./ai/prompt";
 import { generateSummary } from "./ai/summary";
@@ -37,7 +37,7 @@ import type {
     SummaryResult,
 } from "./types";
 import { Panel } from "./ui/panel";
-import { exportSummaryFile } from "./ui/exporters";
+import { exportSummaryFile, exportTimelineFile } from "./ui/exporters";
 import { injectStyles } from "./ui/style";
 import { showToast } from "./ui/toast";
 
@@ -61,7 +61,7 @@ const panel = new Panel({
     onCopyText: (text) => void copyText(text),
     onRefresh: () => void refreshAi(),
     onDetectAds: () => void detectAdsNow(),
-    onExport: exportSummary,
+    onExport: (target) => exportCurrent(target),
     onAdSkipToggle: (enabled) => {
         saveFeatureSettings({ autoSkipAds: enabled });
         if (!enabled) panel.hideAdConfirm();
@@ -91,7 +91,17 @@ async function copyText(text: string): Promise<void> {
     }
 }
 
-function exportSummary(): void {
+/** 导出: 总结页 = Markdown 总结; 时间轴页 = JSON 时间轴. */
+function exportCurrent(target: "summary" | "timeline"): void {
+    if (target === "timeline") {
+        if (!currentDoc) {
+            showToast("时间轴尚未加载, 无法导出", "warn");
+            return;
+        }
+        exportTimelineFile(currentDoc, panel.getAds());
+        showToast("已导出时间轴 JSON");
+        return;
+    }
     const summary = panel.getSummary();
     if (!summary || !currentDoc) {
         showToast("总结尚未生成, 请先生成", "warn");
@@ -99,6 +109,11 @@ function exportSummary(): void {
     }
     exportSummaryFile(currentDoc, summary);
     showToast("已导出视频总结 Markdown");
+}
+
+/** 广告片段进入面板前统一过阈值 (误判防护), 缓存/识别/流式共用. */
+function applyAdThreshold(ads: AdSegment[]): AdSegment[] {
+    return filterAdsByDuration(ads, getFeatureSettings().adMinDuration);
 }
 
 /**
@@ -179,8 +194,8 @@ function writeCache(
 
 // ---------------- AI 任务调度 ----------------
 
-/** auto = 自动 (按 plan + 缓存补缺); refresh = ⟳ 重生成总结; ads-only = 时间轴手动识别广告. */
-type RunMode = "auto" | "refresh" | "ads-only";
+/** auto = 自动 (缓存优先, 按 plan 补缺); summary = 总结页 ⟳ 仅生成总结; ads = 时间轴页 ⟳ 仅识别广告. */
+type RunMode = "auto" | "summary" | "ads";
 
 async function runAiTasks(
     token: number,
@@ -193,18 +208,23 @@ async function runAiTasks(
 
     let needSummary: boolean;
     let needAds: boolean;
-    if (mode === "refresh") {
+    if (mode === "summary") {
         needSummary = true;
         needAds = false;
-    } else if (mode === "ads-only") {
+    } else if (mode === "ads") {
         needSummary = false;
         needAds = true;
     } else {
+        // 有缓存直接全量应用 (与开关无关, 关掉开关也能看到已有结果);
+        // 开关只决定是否自动补齐缺失的部分
         const cached = readCache(cacheKey);
         if (cached) {
             panel.applyResult({
-                summary: plan.summary ? cached.summary : null,
-                ads: plan.ads ? cached.ads : null,
+                summary: cached.summary,
+                ads:
+                    cached.ads === null
+                        ? null
+                        : applyAdThreshold(cached.ads),
             });
         }
         needSummary = plan.summary && !cached?.summary;
@@ -246,7 +266,9 @@ async function runAiTasks(
                             sections: partial.sections ?? [],
                         });
                     }
-                    if (partial.ads) panel.setAdsPartial(partial.ads);
+                    if (partial.ads) {
+                        panel.setAdsPartial(applyAdThreshold(partial.ads));
+                    }
                 },
             );
             if (token !== runToken) return;
@@ -256,7 +278,7 @@ async function runAiTasks(
             };
             ads = combined.ads;
             panel.setSummary(summary);
-            panel.setAds(ads);
+            panel.setAds(applyAdThreshold(ads));
         } catch (error) {
             if (token !== runToken) return;
             log("合并请求失败, 降级为分任务:", errorMessage(error));
@@ -270,7 +292,7 @@ async function runAiTasks(
         try {
             ads = await detectAds(doc.items, meta);
             if (token !== runToken) return;
-            panel.setAds(ads);
+            panel.setAds(applyAdThreshold(ads));
         } catch (error) {
             if (token !== runToken) return;
             panel.setTaskError("ads", errorMessage(error));
@@ -298,7 +320,7 @@ async function runAiTasks(
     });
 }
 
-/**  ⟳ 总结页: 仅重新生成总结 */
+/** 总结页 ⟳: 仅生成总结 (覆盖 autoSummary 开关). */
 async function refreshAi(): Promise<void> {
     const doc = currentDoc;
     if (!doc || !doc.track) {
@@ -312,10 +334,10 @@ async function refreshAi(): Promise<void> {
     }
     abortAllAiRequests();
     const token = ++runToken;
-    await runAiTasks(token, doc, currentPageKey, "refresh");
+    await runAiTasks(token, doc, currentPageKey, "summary");
 }
 
-/** 时间轴页「识别广告」: 仅跑广告识别. */
+/** 时间轴页 ⟳: 仅识别广告 (覆盖 detectAds 开关). */
 async function detectAdsNow(): Promise<void> {
     const doc = currentDoc;
     if (!doc || !doc.track) {
@@ -329,7 +351,7 @@ async function detectAdsNow(): Promise<void> {
     }
     abortAllAiRequests();
     const token = ++runToken;
-    await runAiTasks(token, doc, currentPageKey, "ads-only");
+    await runAiTasks(token, doc, currentPageKey, "ads");
 }
 
 async function handlePage(): Promise<void> {
