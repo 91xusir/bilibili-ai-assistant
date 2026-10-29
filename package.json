@@ -7,7 +7,6 @@
     "build": "bun run build.ts",
     "dev": "bun run build.ts --debug",
     "test": "bun test .",
-    "typecheck": "tsc --noEmit",
     "lint": "tsc --noEmit --noUnusedLocals --noUnusedParameters"
   },
   "devDependencies": {

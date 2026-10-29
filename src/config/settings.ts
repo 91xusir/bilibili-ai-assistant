@@ -1,7 +1,5 @@
 import {
-    storageDelete,
     storageGet,
-    storageKeys,
     storageSet,
 } from "../core/storage";
 import type {
@@ -66,12 +64,10 @@ export function isAiConfigured(): boolean {
 
 /**
  * 由功能开关推导任务计划 (纯函数, 供单测):
- * - 自动跳过开启 → 广告识别强制视为开启 (跳过依赖识别结果)
- * - 总结与广告同时生效 → combined 单请求; 只开其一 → 单任务; 全关 → none (仅手动)
  */
 export function resolveTaskPlan(features: FeatureSettings): TaskPlan {
     const summary = features.autoSummary;
-    const ads = features.detectAds || features.autoSkipAds;
+    const ads = features.detectAds;
     const mode = summary && ads
         ? "combined"
         : summary
@@ -79,7 +75,7 @@ export function resolveTaskPlan(features: FeatureSettings): TaskPlan {
           : ads
             ? "ads"
             : "none";
-    return { summary, ads, autoSkip: features.autoSkipAds, mode };
+    return { summary, ads, mode };
 }
 
 /**
@@ -98,19 +94,4 @@ export function isCacheExpired(
 /** AI 结果缓存按视频键 (videoKey, 如 "BV1xxx?p=2") 区分. */
 export function aiCacheKey(videoKey: string): string {
     return `bia:ai-cache:${videoKey}`;
-}
-
-/**
- * 清理历史版本的存储键:
- * - 旧功能开关键 (bia:ad-skip-enabled / bia:task-toggles)
- * - 旧缓存键格式 bia:ai-cache:{bvid}:{cid}:{model} (含 2 个以上冒号)
- */
-export function cleanupLegacyStorage(): void {
-    storageDelete("bia:ad-skip-enabled");
-    storageDelete("bia:task-toggles");
-    for (const key of storageKeys()) {
-        if (!key.startsWith("bia:ai-cache:")) continue;
-        // 新格式 = "bia:ai-cache:{videoKey}" (3 段); 旧格式含 :cid:model 共 5 段
-        if (key.split(":").length > 3) storageDelete(key);
-    }
 }

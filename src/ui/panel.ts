@@ -441,7 +441,7 @@ export class Panel {
     private buildRefreshFab(): HTMLButtonElement {
         const refreshFab = el("button", "bia-fab") as HTMLButtonElement;
         refreshFab.type = "button";
-        refreshFab.title = "重新生成 (总结 + 广告识别)";
+        refreshFab.title = "重新生成总结";
         refreshFab.innerHTML = ICON_REFRESH;
         refreshFab.addEventListener("click", () => this.callbacks.onRefresh());
         this.refreshFab = refreshFab;
@@ -571,7 +571,7 @@ export class Panel {
         );
         const chars = this.aiReceivedChars;
         this.statusBar.classList.add("bia-show");
-        this.statusTextEl.textContent = `AI 生成中 · ${model} · ${elapsed}s${
+        this.statusTextEl.textContent = `AI 处理中 · ${model} · ${elapsed}s${
             chars > 0 ? ` · 已生成 ${chars} 字` : ""
         }`;
     }

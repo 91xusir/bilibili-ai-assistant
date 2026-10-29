@@ -1,12 +1,10 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import {
     aiCacheKey,
-    cleanupLegacyStorage,
     getFeatureSettings,
     isCacheExpired,
     resolveTaskPlan,
 } from "../src/config/settings";
-import { storageHydrate } from "../src/core/storage";
 import type { FeatureSettings } from "../src/types";
 
 // ---- chrome.storage.local 内存 mock (settings 模块的水合缓存依赖它) ----
@@ -65,17 +63,13 @@ describe("resolveTaskPlan", () => {
         expect(plan.ads).toBe(true);
     });
 
-    test("关广告识别但开自动跳过 → 识别强制生效", () => {
+    test("关广告识别 → 仅总结", () => {
         const plan = resolveTaskPlan({ ...base, detectAds: false });
-        expect(plan.mode).toBe("combined");
-        expect(plan.ads).toBe(true);
+        expect(plan.mode).toBe("summary");
+        expect(plan.summary).toBe(true);
+        expect(plan.ads).toBe(false);
     });
 
-    test("关自动跳过+开识别 → 识别但不自动跳过", () => {
-        const plan = resolveTaskPlan({ ...base, autoSkipAds: false });
-        expect(plan.mode).toBe("combined");
-        expect(plan.autoSkip).toBe(false);
-    });
 
     test("全关 → none (仅手动触发)", () => {
         const plan = resolveTaskPlan({
@@ -106,22 +100,6 @@ describe("isCacheExpired", () => {
 describe("aiCacheKey", () => {
     test("按视频键缓存 (含分P)", () => {
         expect(aiCacheKey("BV1xxx?p=2")).toBe("bia:ai-cache:BV1xxx?p=2");
-    });
-});
-
-describe("cleanupLegacyStorage", () => {
-    test("删除旧格式缓存键与旧开关键, 保留新格式", async () => {
-        backing.set("bia:ai-cache:BV1old:123:model", {});
-        backing.set("bia:ai-cache:BV1new?p=1", {});
-        backing.set("bia:ad-skip-enabled", true);
-        backing.set("bia:task-toggles", {});
-        // 清理遍历的是水合后的内存快照, 需先 hydrate
-        await storageHydrate();
-        cleanupLegacyStorage();
-        expect(backing.has("bia:ai-cache:BV1old:123:model")).toBe(false);
-        expect(backing.has("bia:ad-skip-enabled")).toBe(false);
-        expect(backing.has("bia:task-toggles")).toBe(false);
-        expect(backing.has("bia:ai-cache:BV1new?p=1")).toBe(true);
     });
 });
 

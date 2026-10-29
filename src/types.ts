@@ -90,13 +90,12 @@ export interface TaskState {
 
 /**
  * 本次进入视频要执行的任务计划 (由功能开关推导, 纯函数可单测):
- * - ads 生效 = detectAds || autoSkipAds (自动跳过依赖识别结果)
+ * - ads 生效 = detectAds
  * - summary 与 ads 同时生效 → combined 单请求 (广告提示词最前, 流式优先返回广告)
  */
 export interface TaskPlan {
     summary: boolean;
     ads: boolean;
-    autoSkip: boolean;
     mode: "combined" | "summary" | "ads" | "none";
 }
 

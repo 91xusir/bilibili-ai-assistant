@@ -7,7 +7,6 @@ import { buildTranscript } from "./ai/prompt";
 import { generateSummary } from "./ai/summary";
 import {
     aiCacheKey,
-    cleanupLegacyStorage,
     getAiSettings,
     getFeatureSettings,
     isAiConfigured,
@@ -180,7 +179,7 @@ function writeCache(
 
 // ---------------- AI 任务调度 ----------------
 
-/** auto = 自动 (按 plan + 缓存补缺); refresh = ⟳ 重生成; ads-only = 时间轴手动识别广告. */
+/** auto = 自动 (按 plan + 缓存补缺); refresh = ⟳ 重生成总结; ads-only = 时间轴手动识别广告. */
 type RunMode = "auto" | "refresh" | "ads-only";
 
 async function runAiTasks(
@@ -196,7 +195,7 @@ async function runAiTasks(
     let needAds: boolean;
     if (mode === "refresh") {
         needSummary = true;
-        needAds = plan.ads;
+        needAds = false;
     } else if (mode === "ads-only") {
         needSummary = false;
         needAds = true;
@@ -299,7 +298,7 @@ async function runAiTasks(
     });
 }
 
-/** ⟳ 重新生成: 总结必跑 (手动覆盖 autoSummary), 广告按 plan 附带. */
+/**  ⟳ 总结页: 仅重新生成总结 */
 async function refreshAi(): Promise<void> {
     const doc = currentDoc;
     if (!doc || !doc.track) {
@@ -407,7 +406,6 @@ async function handlePage(): Promise<void> {
 export async function main(): Promise<void> {
     // 水合 chrome.storage, 保证设置同步可读
     await storageHydrate();
-    cleanupLegacyStorage();
     injectStyles();
 
     // 弹窗/选项页修改设置后, 内容脚本实时同步 (内存缓存 + 面板状态)

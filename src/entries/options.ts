@@ -26,7 +26,7 @@ function buildTaskToggles(): void {
     container.appendChild(
         buildSwitchRow(
             "自动总结",
-            "进入视频后自动生成 AI 总结 (关闭后可用面板右下角 ⟳ 手动生成)",
+            "进入视频后自动生成 AI 总结",
             features.autoSummary,
             (value) => saveFeatureSettings({ autoSummary: value }),
         ),
@@ -34,7 +34,7 @@ function buildTaskToggles(): void {
     container.appendChild(
         buildSwitchRow(
             "识别广告",
-            "识别视频中的广告片段 (自动跳过开启时强制开启)",
+            "识别视频中的广告片段",
             features.detectAds,
             (value) => saveFeatureSettings({ detectAds: value }),
         ),
@@ -42,7 +42,7 @@ function buildTaskToggles(): void {
     container.appendChild(
         buildSwitchRow(
             "自动跳过广告",
-            "关闭后播放到广告时在面板弹提示确认 (3 秒自动关闭)",
+            "自动跳过广告片段",
             features.autoSkipAds,
             (value) => saveFeatureSettings({ autoSkipAds: value }),
         ),

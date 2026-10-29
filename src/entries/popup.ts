@@ -31,7 +31,7 @@ async function init(): Promise<void> {
         root.appendChild(
             buildSwitchRow(
                 "识别广告",
-                "识别视频中的广告片段 (自动跳过开启时强制开启)",
+                "识别视频中的广告片段",
                 f.detectAds,
                 (value) => saveFeatureSettings({ detectAds: value }),
             ),

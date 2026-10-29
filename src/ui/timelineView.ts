@@ -48,8 +48,8 @@ export function renderTimelineView(
     for (const item of items) {
         const row = el("div", "bia-tl-row");
         const ad = ads.find(
-            (segment) =>
-                item.from >= segment.from - 0.01 && item.from < segment.to,
+            (segment) =>//小于5秒的广告可能是误判
+                segment.to - segment.from > 5 && item.from >= segment.from - 0.01 && item.from < segment.to,
         );
         if (ad) row.classList.add("bia-tl-ad-row");
 
@@ -103,7 +103,7 @@ function buildToolbar(props: TimelineViewProps): HTMLElement {
         props.adsTask.status === "loading" ? "识别中..." : "识别广告",
     ) as HTMLButtonElement;
     button.type = "button";
-    button.title = "单独识别本视频的广告片段 (时间轴标记红行)";
+    button.title = "单独识别本视频的广告片段";
     button.disabled = props.generating;
     button.addEventListener("click", () => props.onDetectAds());
     bar.appendChild(button);
