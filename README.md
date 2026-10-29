@@ -1,4 +1,4 @@
-<div align="center"><img src="https://img.shields.io/badge/Contribution-cccccc" alt="Contribution"><img src="https://img.shields.io/badge/🤖%20Agent-100%25-94C9E7" alt="Agent"><img src="https://img.shields.io/badge/🧑‍💻%20Human-0%25-A86F4D" alt="Human"></div>
+<div align="center"><img src="https://img.shields.io/badge/Contribution-cccccc" alt="Contribution"><img src="https://img.shields.io/badge/🤖%20Agent-81%25-94C9E7" alt="Agent"><img src="https://img.shields.io/badge/🧑‍💻%20Human-19%25-A86F4D" alt="Human"></div>
 
 ## 用法
 
