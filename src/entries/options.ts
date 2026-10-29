@@ -415,14 +415,21 @@ function formatBytes(bytes: number): string {
 
 async function renderCacheManage(): Promise<void> {
     const container = document.getElementById("cache-manage");
+    const searchInput = document.getElementById(
+        "cache-search",
+    ) as HTMLInputElement | null;
     if (!container) return;
     container.innerHTML = "";
     const entries = await listCacheEntries();
+    // 无缓存: 隐藏搜索框, 显示占位
+    if (searchInput) searchInput.style.display = entries.length ? "" : "none";
     if (entries.length === 0) {
         container.appendChild(el("div", "bia-cache-empty", "暂无缓存"));
         return;
     }
 
+    // 滚动容器: 工具栏吸顶 (sticky), 列表内部滚动
+    const scroll = el("div", "bia-cache-scroll");
     const toolbar = el("div", "bia-cache-toolbar");
     const selectAll = document.createElement("input");
     selectAll.type = "checkbox";
@@ -433,20 +440,31 @@ async function renderCacheManage(): Promise<void> {
     clearButton.type = "button";
     clearButton.disabled = true;
     toolbar.append(selectAllLabel, countText, clearButton);
-    container.appendChild(toolbar);
+    scroll.appendChild(toolbar);
 
     const list = el("div", "bia-cache-list");
     const checkboxes: HTMLInputElement[] = [];
+    // 可见行 (未被搜索过滤的): 全选/清理只作用于可见行
+    const visibleRows = () =>
+        checkboxes.filter(
+            (box) =>
+                (box.closest(".bia-cache-item") as HTMLElement).style
+                    .display !== "none",
+        );
     const updateState = () => {
-        const checked = checkboxes.filter((box) => box.checked);
+        const visible = visibleRows();
+        const checked = visible.filter((box) => box.checked);
         clearButton.disabled = checked.length === 0;
         selectAll.checked =
-            checked.length === checkboxes.length && checkboxes.length > 0;
-        selectAll.indeterminate =
-            !selectAll.checked && checked.length > 0;
+            visible.length > 0 && checked.length === visible.length;
+        selectAll.indeterminate = !selectAll.checked && checked.length > 0;
+        countText.textContent = searchInput?.value.trim()
+            ? `显示 ${visible.length} / ${entries.length} 个视频`
+            : `共 ${entries.length} 个视频`;
     };
     for (const entry of entries) {
         const item = el("div", "bia-cache-item");
+        item.dataset.searchKey = `${entry.title} ${entry.key}`.toLowerCase();
         const checkbox = document.createElement("input");
         checkbox.type = "checkbox";
         checkbox.dataset.key = entry.key;
@@ -473,10 +491,30 @@ async function renderCacheManage(): Promise<void> {
         list.appendChild(item);
         checkboxes.push(checkbox);
     }
-    container.appendChild(list);
+    scroll.appendChild(list);
+    container.appendChild(scroll);
+
+    // 搜索: 按标题/视频键过滤可见行 (输入在容器外, 重渲染不丢焦点/文本)
+    const applyFilter = () => {
+        const query = (searchInput?.value ?? "").trim().toLowerCase();
+        for (const checkbox of checkboxes) {
+            const item = checkbox.closest(
+                ".bia-cache-item",
+            ) as HTMLElement;
+            item.style.display =
+                !query || item.dataset.searchKey!.includes(query)
+                    ? ""
+                    : "none";
+        }
+        updateState();
+    };
+    searchInput?.addEventListener("input", applyFilter);
 
     selectAll.addEventListener("change", () => {
-        for (const checkbox of checkboxes) checkbox.checked = selectAll.checked;
+        // 全选只作用于搜索后的可见行
+        for (const checkbox of visibleRows()) {
+            checkbox.checked = selectAll.checked;
+        }
         updateState();
     });
     clearButton.addEventListener("click", () => {
